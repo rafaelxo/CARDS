@@ -157,9 +157,14 @@ def fmt_brl(valor):
 # ══════════════════════════════════════════════════════════════
 def exportar_excel(registros, data_sessao_str, caminho):
     from collections import defaultdict
+
+    def normalizar_titulo_aba(titulo):
+        limpo = re.sub(r'[:\\/\?\*\[\]]', '-', titulo).strip()
+        return (limpo or 'Notas')[:31]
+
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = f"Notas {data_sessao_str}"
+    ws.title = normalizar_titulo_aba(f"Notas {data_sessao_str}")
 
     def cell(r, c, v, bold=False, color="E8EAF0", bg=None, fmt=None, align='center'):
         cel = ws.cell(row=r, column=c, value=v)
