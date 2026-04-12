@@ -43,41 +43,93 @@ C = {
 
 # ══════════════════════════════════════════════════════════════
 #  DICIONÁRIOS OCR
+#  Ordem importa: do mais específico para o mais genérico.
+#  Padrões calibrados para comprovantes Cielo (e outros).
 # ══════════════════════════════════════════════════════════════
-BANDEIRAS = {
-    r'\bvisa\s*electron\b': 'Visa Electron',
-    r'\bvisa\s*vale\b': 'Visa Vale',
-    r'\bvisa\s*(pre.?pago|prepago)\b': 'Visa Pré-pago',
-    r'\bvisa\b': 'Visa',
-    r'\bmastercard\s*(pre.?pago|prepago)\b': 'Mastercard Pré-pago',
-    r'\bmaster\s*(pre.?pago|prepago)\b': 'Mastercard Pré-pago',
-    r'\bmaestro\b': 'Maestro',
-    r'\bmastercard\b': 'Mastercard',
-    r'\bmaster\b': 'Mastercard',
-    r'\belo\s*(pre.?pago|prepago)\b': 'Elo Pré-pago',
-    r'\belo\b': 'Elo',
-    r'\bhipercard\b': 'Hipercard',
-    r'\bhiper\b': 'Hipercard',
-    r'\bamerican\s*express\b': 'American Express',
-    r'\bamex\b': 'American Express',
-    r'\bcabal\s*(pre.?pago|prepago)\b': 'Cabal Pré-pago',
-    r'\bcabal\b': 'Cabal',
-    r'\baura\b': 'Aura',
-    r'\bdinersclub\b|\bdiners\s*club\b|\bdiners\b': 'Diners Club',
-    r'\balelo\b': 'Alelo',
-    r'\bbeneflex\b': 'Beneflex',
-    r'\bsorocred\b': 'Sorocred',
-    r'\bvr\s*(beneficios|refeicao|alimentacao)\b': 'VR Benefícios',
-    r'\bticket\b': 'Ticket',
-    r'\bsodexo\b': 'Sodexo',
-}
 
-TIPOS = {
-    r'\bpre.?pago\b|\bprepago\b': 'Pré-pago',
-    r'\bdebito\b|\bd[ée]bito\b|\bdebit\b': 'Débito',
-    r'\bcredito\b|\bcr[eé]dito\b|\bcredit\b': 'Crédito',
-    r'\bcontactless\b|\bsem\s*contato\b': 'Contactless',
-}
+# ── BANDEIRAS ─────────────────────────────────────────────────
+# Cada entrada: (regex_no_texto_completo, nome_normalizado)
+# Testados na ordem da lista — primeiro match vence.
+BANDEIRAS_REGRAS = [
+    # ── PIX ──────────────────────────────────────────────────────
+    (r'pagamento\s*p[il1]x|p[il1]x\s*bacen|\bp[il1]x\b', 'PIX'),
+
+    # ── PRÉ-PAGOS (antes dos genéricos) ─────────────────────────
+    # "PREPAGO MASTERCARD" ou "MASTERCARD PREPAGO" e variações com erro OCR
+    (r'pre.{0,3}pago\s*m[ao4]ster|m[ao4]ster.{0,5}pre.{0,3}pago', 'Mastercard Pré-pago'),
+    (r'pre.{0,3}pago\s*v[il1]sa|v[il1]sa\s*pre.{0,3}pago',        'Visa Pré-pago'),
+    (r'pre.{0,3}pago\s*el[o0]|el[o0]\s*pre.{0,3}pago',            'Elo Pré-pago'),
+    (r'cabal\s*pre.{0,3}pago|pre.{0,3}pago\s*cabal',              'Cabal Pré-pago'),
+
+    # ── VISA ──────────────────────────────────────────────────────
+    # OCR pode ler "V1SA", "VJSA", "VÏSA"
+    (r'v[il1j][s5][a4]\s*electron',   'Visa Electron'),
+    (r'v[il1j][s5][a4]\s*vale',       'Visa Vale'),
+    (r'\bv[il1j][s5][a4]\b',          'Visa'),
+
+    # ── MASTERCARD ───────────────────────────────────────────────
+    # OCR pode ler "HASTERCARD", "MAST3RCARD", etc.
+    (r'\bm[a4][s5]t[e3]r\s*c[a4]rd\b|\bm[a4][s5]t[e3]rc[a4]rd\b', 'Mastercard'),
+    (r'\bm[a4][s5]t[e3]r\b',         'Mastercard'),
+    (r'\bm[a4][e3]stro\b',           'Maestro'),
+
+    # ── ELO ──────────────────────────────────────────────────────
+    # OCR pode ler "EL0", "ELQ"
+    (r'\bel[o0q]\b',                  'Elo'),
+
+    # ── HIPERCARD ────────────────────────────────────────────────
+    (r'h[il1]p[e3]r\s*c[a4]rd|h[il1]p[e3]rc[a4]rd|\bh[il1]p[e3]r\b', 'Hipercard'),
+
+    # ── AMERICAN EXPRESS ─────────────────────────────────────────
+    (r'am[e3]r[il1]c[a4]n\s*[e3]xpr[e3]ss|\b[a4]m[e3]x\b', 'American Express'),
+
+    # ── CABAL ────────────────────────────────────────────────────
+    (r'\bc[a4]b[a4]l\b',             'Cabal'),
+
+    # ── BENEFÍCIOS ───────────────────────────────────────────────
+    (r'\b[a4]l[e3]lo\b',             'Alelo'),
+    (r'\bt[il1]ck[e3]t\b',          'Ticket'),
+    (r'\bsod[e3]xo\b',              'Sodexo'),
+    (r'vr\s*(ben[e3]f[il1]c|r[e3]f[e3][il1]|[a4]l[il1]m)', 'VR Benefícios'),
+    (r'\bb[e3]n[e3]fl[e3]x\b',      'Beneflex'),
+
+    # ── OUTROS ───────────────────────────────────────────────────
+    (r'\b[a4]ur[a4]\b',             'Aura'),
+    (r'd[il1]n[e3]rs\s*club|\bd[il1]n[e3]rs\b', 'Diners Club'),
+    (r'\bsorocr[e3]d\b',            'Sorocred'),
+
+    # Sicoob emite PIX
+    (r'\bs[il1]co+b\b',             'PIX / Sicoob'),
+]
+
+# ── TIPOS DE PAGAMENTO ─────────────────────────────────────────
+# Padrão Cielo: "DEBITO A VISTA", "CREDITO A VISTA", "PAGAMENTO PIX"
+# Tolerante a erros OCR comuns (O↔0, I↔1, S↔5, etc.)
+TIPOS_REGRAS = [
+    # PIX — antes de débito para não confundir
+    (r'pagamento\s*p[il1]x|p[il1]x\s*r\$|\bp[il1]x\b', 'PIX'),
+
+    # Pré-pago
+    (r'pr[e3].{0,3}p[a4]go|pr[e3]p[a4]go',            'Pré-pago'),
+
+    # Débito à Vista — "DEBLIOA VIST" e variações ruidosas
+    (r'd[e3e][b8][il1][il1t][o0]\s*[a4@]\s*v[il1][s5]t[a4]',  'Débito à Vista'),
+    (r'd[e3][b8][il1][o0]\s*[a4]\s*v[il1]st[a4]',             'Débito à Vista'),
+    (r'deb.{0,3}[a4]\s*v[il1]st',                             'Débito à Vista'),
+    (r'd[eé][b8][il1]to|d[eé]bito|debit',                     'Débito à Vista'),
+
+    # Crédito à Vista
+    (r'cr[e3][d][il1]to\s*[a4]\s*v[il1]st[a4]',   'Crédito à Vista'),
+    (r'cr[e3]d.{0,3}[a4]\s*v[il1]st',             'Crédito à Vista'),
+    (r'cr[eé]dito|credit',                         'Crédito à Vista'),
+
+    # Parcelado
+    (r'p[a4]rc[e3]l[a4]do',                       'Parcelado'),
+
+    # Contactless
+    (r'cont[a4]ctl[e3]ss|s[e3]m\s*cont[a4]to',    'Contactless'),
+]
+
 
 # ══════════════════════════════════════════════════════════════
 #  FUNÇÕES OCR
@@ -88,13 +140,26 @@ def get_reader():
         _reader = easyocr.Reader(['pt', 'en'], gpu=False)
     return _reader
 
+
 def extrair_texto(frame):
+    """Extrai texto bruto do frame. Retorna string com todos os tokens."""
     if OCR_ENGINE == "easyocr":
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        res = get_reader().readtext(rgb)
-        return ' '.join([r[1] for r in res])
+        # Redimensionar para facilitar leitura de fontes pequenas
+        h, w = rgb.shape[:2]
+        if w < 800:
+            scale = 800 / w
+            rgb = cv2.resize(rgb, (int(w*scale), int(h*scale)),
+                             interpolation=cv2.INTER_CUBIC)
+        res = get_reader().readtext(rgb, detail=1, paragraph=False)
+        # Ordenar top→bottom, left→right para manter contexto de linha
+        res_sorted = sorted(res, key=lambda r: (r[0][0][1], r[0][0][0]))
+        return ' '.join([r[1] for r in res_sorted])
+
     elif OCR_ENGINE == "tesseract":
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # Upscale antes do Tesseract
+        gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         gray = clahe.apply(gray)
         binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -102,51 +167,79 @@ def extrair_texto(frame):
         return pytesseract.image_to_string(binary, config='--psm 6 -l por+eng')
     return ""
 
-def extrair_bandeira(t):
-    tl = t.lower()
-    for p, n in BANDEIRAS.items():
-        if re.search(p, tl): return n
+
+def _match_regras(texto, regras):
+    """Testa lista de (regex, nome) contra texto. Retorna primeiro match."""
+    tl = texto.lower()
+    for padrao, nome in regras:
+        if re.search(padrao, tl):
+            return nome
     return None
 
-def extrair_tipo(t):
-    tl = t.lower()
-    for p, n in TIPOS.items():
-        if re.search(p, tl): return n
-    return None
+
+def extrair_bandeira(texto):
+    return _match_regras(texto, BANDEIRAS_REGRAS)
+
+
+def extrair_tipo(texto):
+    return _match_regras(texto, TIPOS_REGRAS)
+
 
 def extrair_valor(texto):
+    """
+    Extrai valor monetário. Prioriza padrão Cielo:
+    valor aparece como "R$ 130,01" ou "50,00" (sem R$) perto de "VALOR".
+    """
+    candidatos = []
+
     for p in [
-        r'R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2}))',
-        r'R\$\s*(\d+[,\.]\d{2})',
-        r'TOTAL[:\s]*R?\$?\s*(\d+[,\.]\d{2})',
-        r'VALOR[:\s]*R?\$?\s*(\d+[,\.]\d{2})',
+        # Com R$ explícito — mais confiável
+        r'R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2})',
+        r'R\$\s*(\d+,\d{2})',
+        # Após palavra VALOR (padrão Cielo sem R$)
+        r'VALOR[\s:]*(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})',
+        r'VALOR[\s:]*(?:R\$\s*)?(\d+,\d{2})',
+        # Número isolado no formato brasileiro — último recurso
         r'(?<!\d)(\d{1,3}(?:\.\d{3})*,\d{2})(?!\d)',
     ]:
-        m = re.search(p, texto, re.IGNORECASE)
-        if m:
+        for m in re.finditer(p, texto, re.IGNORECASE):
             try:
                 v = float(m.group(1).replace('.', '').replace(',', '.'))
                 if 0.01 <= v <= 99999.99:
-                    return v
-            except: pass
-    return None
+                    candidatos.append(v)
+            except:
+                pass
+
+    if not candidatos:
+        return None
+    # Retorna o maior valor encontrado (geralmente o total é o maior)
+    return max(candidatos)
+
 
 def extrair_data(texto):
+    """
+    Extrai data. Padrão Cielo: DD/MM/AA (ex: 11/04/26).
+    Também suporta DD/MM/AAAA e AAAA/MM/DD.
+    """
     for p in [
-        r'(\d{2})[/\-\.](\d{2})[/\-\.](\d{4})',
-        r'(\d{2})[/\-\.](\d{2})[/\-\.](\d{2})(?!\d)',
-        r'(\d{4})[/\-\.](\d{2})[/\-\.](\d{2})',
+        r'(\d{2})[/\-\.](\d{2})[/\-\.](\d{4})',   # DD/MM/YYYY
+        r'(\d{4})[/\-\.](\d{2})[/\-\.](\d{2})',   # YYYY/MM/DD
+        r'(\d{2})[/\-\.](\d{2})[/\-\.](\d{2})\b', # DD/MM/YY  ← padrão Cielo
     ]:
         m = re.search(p, texto)
         if m:
             try:
                 g = m.groups()
-                if len(g[2]) == 4: return date(int(g[2]), int(g[1]), int(g[0]))
-                elif len(g[0]) == 4: return date(int(g[0]), int(g[1]), int(g[2]))
+                if len(g[2]) == 4:
+                    return date(int(g[2]), int(g[1]), int(g[0]))
+                elif len(g[0]) == 4:
+                    return date(int(g[0]), int(g[1]), int(g[2]))
                 else:
-                    a = 2000+int(g[2]) if int(g[2]) < 50 else 1900+int(g[2])
+                    # DD/MM/YY — assume século 2000 se YY < 50
+                    a = 2000 + int(g[2]) if int(g[2]) < 50 else 1900 + int(g[2])
                     return date(a, int(g[1]), int(g[0]))
-            except: pass
+            except:
+                pass
     return None
 
 def fmt_brl(valor):
@@ -157,14 +250,9 @@ def fmt_brl(valor):
 # ══════════════════════════════════════════════════════════════
 def exportar_excel(registros, data_sessao_str, caminho):
     from collections import defaultdict
-
-    def normalizar_titulo_aba(titulo):
-        limpo = re.sub(r'[:\\/\?\*\[\]]', '-', titulo).strip()
-        return (limpo or 'Notas')[:31]
-
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = normalizar_titulo_aba(f"Notas {data_sessao_str}")
+    ws.title = f"Notas {data_sessao_str}"
 
     def cell(r, c, v, bold=False, color="E8EAF0", bg=None, fmt=None, align='center'):
         cel = ws.cell(row=r, column=c, value=v)
@@ -626,15 +714,23 @@ class App:
         valor = extrair_valor(texto)
         data = extrair_data(texto)
 
+        # PIX: unificar bandeira e tipo
+        if bandeira == 'PIX' and tipo is None:
+            tipo = 'PIX'
+        if tipo == 'PIX' and bandeira is None:
+            bandeira = 'PIX'
+
         if valor is None:
-            self.root.after(0, lambda: self.lbl_status.config(
-                text='Valor não identificado — reposicione a nota', fg=C['muted']))
+            trecho = texto[:80].replace(chr(10), ' ') if texto else '(sem texto)'
+            self.root.after(0, lambda t=trecho: self.lbl_status.config(
+                text=f'Valor não encontrado. OCR: "{t}"', fg=C['muted']))
             return
 
         self.root.after(0, self._exibir_campos, {
             'bandeira': bandeira or 'Não identificada',
             'tipo': tipo or 'Não identificado',
             'valor': valor, 'data': data,
+            'texto_bruto': texto,
         })
 
     def _exibir_campos(self, r):
