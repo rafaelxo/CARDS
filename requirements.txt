@@ -1,0 +1,18 @@
+# OCR - escolha UMA das opções abaixo:
+easyocr>=1.7.0          # Recomendado: melhor com fotos de baixa qualidade
+# pytesseract>=0.3.10   # Alternativa mais leve (requer Tesseract instalado no SO)
+
+# Visão computacional
+opencv-python>=4.8.0
+
+# Imagem
+Pillow>=10.0.0
+
+# Planilha
+openpyxl>=3.1.0
+
+# Numpy (dependência do EasyOCR/OpenCV)
+numpy>=1.24.0
+
+# Para gerar o .exe
+pyinstaller>=6.0.0
