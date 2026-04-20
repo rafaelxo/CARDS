@@ -41,7 +41,7 @@ C = {
 
 # ── BANDEIRAS ─────────────────────────────────────────────────
 # Cada entrada: (regex_no_texto_completo, nome_normalizado)
-# Testados na ordem da lista — primeiro match vence.
+
 BANDEIRAS_REGRAS = [
     # ── PIX ──────────────────────────────────────────────────────
     (r'pagamento\s*p[il1]x|p[il1]x\s*bacen|\bp[il1]x\b', 'PIX'),
@@ -96,7 +96,7 @@ BANDEIRAS_REGRAS = [
 
 # ── TIPOS DE PAGAMENTO ─────────────────────────────────────────
 # Padrão Cielo: "DEBITO A VISTA", "CREDITO A VISTA", "PAGAMENTO PIX"
-# Tolerante a erros OCR comuns (O↔0, I↔1, S↔5, etc.)
+
 TIPOS_REGRAS = [
     # PIX — antes de débito para não confundir
     (r'pagamento\s*p[il1]x|p[il1]x\s*r\$|\bp[il1]x\b', 'PIX'),
@@ -118,10 +118,8 @@ TIPOS_REGRAS = [
     (r'cont[a4]ctl[e3]ss|s[e3]m\s*cont[a4]to',    'Contactless'),
 ]
 
+# FUNÇÕES OCR
 
-# ══════════════════════════════════════════════════════════════
-#  FUNÇÕES OCR
-# ══════════════════════════════════════════════════════════════
 def get_reader():
     global _reader
     if _reader is None:
@@ -429,9 +427,8 @@ def extrair_data(texto):
 def fmt_brl(valor):
     return f"R$ {valor:,.2f}".replace(',','X').replace('.',',').replace('X','.')
 
-# ══════════════════════════════════════════════════════════════
-#  EXPORTAÇÃO
-# ══════════════════════════════════════════════════════════════
+# EXPORTAÇÃO
+
 def exportar_excel(registros, data_sessao_str, caminho):
     from collections import defaultdict
     wb = openpyxl.Workbook()
@@ -497,9 +494,8 @@ def exportar_excel(registros, data_sessao_str, caminho):
     wb.save(caminho)
     return total
 
-# ══════════════════════════════════════════════════════════════
-#  APP
-# ══════════════════════════════════════════════════════════════
+# APP
+
 class App:
     def __init__(self, root):
         self.root = root
