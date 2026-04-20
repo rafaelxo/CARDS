@@ -4,6 +4,7 @@ import cv2
 import threading
 import time
 import re
+import unicodedata
 from datetime import datetime, date
 from PIL import Image, ImageTk
 import openpyxl
@@ -22,9 +23,6 @@ except ImportError:
     except ImportError:
         OCR_ENGINE = "none"
 
-# ══════════════════════════════════════════════════════════════
-#  TEMA
-# ══════════════════════════════════════════════════════════════
 C = {
     'bg':       '#111318',
     'surface':  '#1C1F26',
@@ -40,12 +38,6 @@ C = {
     'success':  '#34D399',
     'panel':    '#161A21',
 }
-
-# ══════════════════════════════════════════════════════════════
-#  DICIONÁRIOS OCR
-#  Ordem importa: do mais específico para o mais genérico.
-#  Padrões calibrados para comprovantes Cielo (e outros).
-# ══════════════════════════════════════════════════════════════
 
 # ── BANDEIRAS ─────────────────────────────────────────────────
 # Cada entrada: (regex_no_texto_completo, nome_normalizado)
@@ -98,8 +90,8 @@ BANDEIRAS_REGRAS = [
     (r'd[il1]n[e3]rs\s*club|\bd[il1]n[e3]rs\b', 'Diners Club'),
     (r'\bsorocr[e3]d\b',            'Sorocred'),
 
-    # Sicoob emite PIX
-    (r'\bs[il1]co+b\b',             'PIX / Sicoob'),
+    # Sicoob aparece em comprovantes PIX
+    (r'\bs[il1]co+b\b',             'PIX'),
 ]
 
 # ── TIPOS DE PAGAMENTO ─────────────────────────────────────────
@@ -109,19 +101,15 @@ TIPOS_REGRAS = [
     # PIX — antes de débito para não confundir
     (r'pagamento\s*p[il1]x|p[il1]x\s*r\$|\bp[il1]x\b', 'PIX'),
 
-    # Pré-pago
-    (r'pr[e3].{0,3}p[a4]go|pr[e3]p[a4]go',            'Pré-pago'),
+    # Débito à Vista — inclusive quando OCR cola palavras: "debitoavista"
+    (r'd[e3][b8][il1]t[o0].{0,8}[a4@].{0,4}v[il1][s5]t[a4]', 'Débito à Vista'),
+    (r'\bdeb[i1l]t[o0]?\s*[a4]?\s*v[i1l]st[a4]\b',        'Débito à Vista'),
+    (r'\bdeb[i1l]t[o0]?\b',                                 'Débito à Vista'),
 
-    # Débito à Vista — "DEBLIOA VIST" e variações ruidosas
-    (r'd[e3e][b8][il1][il1t][o0]\s*[a4@]\s*v[il1][s5]t[a4]',  'Débito à Vista'),
-    (r'd[e3][b8][il1][o0]\s*[a4]\s*v[il1]st[a4]',             'Débito à Vista'),
-    (r'deb.{0,3}[a4]\s*v[il1]st',                             'Débito à Vista'),
-    (r'd[eé][b8][il1]to|d[eé]bito|debit',                     'Débito à Vista'),
-
-    # Crédito à Vista
-    (r'cr[e3][d][il1]to\s*[a4]\s*v[il1]st[a4]',   'Crédito à Vista'),
-    (r'cr[e3]d.{0,3}[a4]\s*v[il1]st',             'Crédito à Vista'),
-    (r'cr[eé]dito|credit',                         'Crédito à Vista'),
+    # Crédito à Vista — inclusive quando OCR cola palavras: "creditoavista"
+    (r'cr[e3]d[i1l]t[o0].{0,8}[a4@].{0,4}v[il1][s5]t[a4]', 'Crédito à Vista'),
+    (r'\bcred[i1l]t[o0]?\s*[a4]?\s*v[i1l]st[a4]\b',      'Crédito à Vista'),
+    (r'\bcred[i1l]t[o0]?\b',                               'Crédito à Vista'),
 
     # Parcelado
     (r'p[a4]rc[e3]l[a4]do',                       'Parcelado'),
@@ -141,20 +129,63 @@ def get_reader():
     return _reader
 
 
-def extrair_texto(frame):
+def _normalizar_texto(texto):
+    t = (texto or '').lower()
+    t = ''.join(
+        ch for ch in unicodedata.normalize('NFD', t)
+        if unicodedata.category(ch) != 'Mn'
+    )
+    t = re.sub(r'[^a-z0-9$]+', ' ', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
+def _rotacionar(frame, angulo):
+    h, w = frame.shape[:2]
+    matriz = cv2.getRotationMatrix2D((w // 2, h // 2), angulo, 1.0)
+    return cv2.warpAffine(
+        frame,
+        matriz,
+        (w, h),
+        flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_REPLICATE,
+    )
+
+
+def extrair_texto(frame, agressivo=False, manter_linhas=False):
     """Extrai texto bruto do frame. Retorna string com todos os tokens."""
     if OCR_ENGINE == "easyocr":
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        # Redimensionar para facilitar leitura de fontes pequenas
-        h, w = rgb.shape[:2]
-        if w < 800:
-            scale = 800 / w
-            rgb = cv2.resize(rgb, (int(w*scale), int(h*scale)),
-                             interpolation=cv2.INTER_CUBIC)
-        res = get_reader().readtext(rgb, detail=1, paragraph=False)
-        # Ordenar top→bottom, left→right para manter contexto de linha
-        res_sorted = sorted(res, key=lambda r: (r[0][0][1], r[0][0][0]))
-        return ' '.join([r[1] for r in res_sorted])
+        candidatos = [frame]
+        if agressivo:
+            candidatos.extend([_rotacionar(frame, -6), _rotacionar(frame, 6)])
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            gray = clahe.apply(gray)
+            bw = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY, 21, 10
+            )
+            candidatos.append(cv2.cvtColor(bw, cv2.COLOR_GRAY2BGR))
+
+        reader = get_reader()
+        textos = []
+        for img in candidatos:
+            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            h, w = rgb.shape[:2]
+            if w < 780:
+                scale = 780 / w
+                rgb = cv2.resize(
+                    rgb,
+                    (int(w * scale), int(h * scale)),
+                    interpolation=cv2.INTER_CUBIC,
+                )
+            res = reader.readtext(rgb, detail=0, paragraph=not manter_linhas)
+            if res:
+                textos.append('\n'.join(res) if manter_linhas else ' '.join(res))
+            if not agressivo and textos:
+                break
+
+        return ' '.join(textos)
 
     elif OCR_ENGINE == "tesseract":
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -171,8 +202,9 @@ def extrair_texto(frame):
 def _match_regras(texto, regras):
     """Testa lista de (regex, nome) contra texto. Retorna primeiro match."""
     tl = texto.lower()
+    tn = _normalizar_texto(texto)
     for padrao, nome in regras:
-        if re.search(padrao, tl):
+        if re.search(padrao, tl) or re.search(padrao, tn):
             return nome
     return None
 
@@ -182,7 +214,121 @@ def extrair_bandeira(texto):
 
 
 def extrair_tipo(texto):
+    normalizado = _normalizar_texto(texto)
+
+    # Linha principal da Cielo costuma vir como:
+    # "PREPAGO MASTERCARD - DEBITO A VISTA"
+    linha_topo = re.search(r'\b(?:prepago\s+)?(?:visa|mastercard|elo|hipercard|amex|cabal)\b\s*[-:]\s*([a-z0-9\s]{6,40})', normalizado)
+    if linha_topo:
+        tipo_linha = _match_regras(linha_topo.group(1), TIPOS_REGRAS)
+        if tipo_linha:
+            return tipo_linha
+
     return _match_regras(texto, TIPOS_REGRAS)
+
+
+def extrair_pix_instituicao(texto):
+    """Retorna instituição do PIX quando identificável no comprovante."""
+    tn = _normalizar_texto(texto)
+    if not re.search(r'\bp[il1]x\b', tn):
+        return None
+
+    if re.search(r'\bs[il1]co+b\b', tn):
+        return 'Sicoob'
+
+    if re.search(r'\bcaixa\b|\bcef\b|caixa\s*economica', tn):
+        return 'Caixa'
+
+    return None
+
+
+def _parse_data_str(data_str):
+    s = re.sub(r'\s+', '', data_str)
+    m = re.match(r'^(\d{2})[/\-.](\d{2})[/\-.](\d{2,4})$', s)
+    if not m:
+        return None
+    d, mo, a = m.groups()
+    try:
+        aa = int(a)
+        if len(a) == 2:
+            aa = 2000 + aa if aa < 50 else 1900 + aa
+        return date(aa, int(mo), int(d))
+    except Exception:
+        return None
+
+
+def extrair_data_pix_layout(texto_linhas):
+    """Para PIX, prioriza data no topo (normalmente acompanhada de hora)."""
+    if not texto_linhas:
+        return None
+
+    # Ex.: "20-04/26 12:05:16" no topo.
+    m = re.search(
+        r'(?im)^\s*(\d{2}\s*[/\-.]\s*\d{2}\s*[/\-.]\s*\d{2,4})\s+\d{1,2}:\d{2}(?::\d{2})?',
+        texto_linhas,
+    )
+    if m:
+        d = _parse_data_str(m.group(1))
+        if d:
+            return d
+
+    # Fallback: primeira data encontrada nas primeiras linhas.
+    for ln in texto_linhas.splitlines()[:6]:
+        mm = re.search(r'(\d{2}\s*[/\-.]\s*\d{2}\s*[/\-.]\s*\d{2,4})', ln)
+        if mm:
+            d = _parse_data_str(mm.group(1))
+            if d:
+                return d
+    return None
+
+
+def extrair_valor_pix_layout(texto_linhas):
+    """Para PIX, prioriza valor na linha do PIX ou da palavra VALOR."""
+    if not texto_linhas:
+        return None
+
+    linhas = [l.strip() for l in texto_linhas.splitlines() if l.strip()]
+
+    def _parse_valor_str(raw):
+        s = raw.strip().replace(' ', '')
+        if ',' in s and '.' in s:
+            s = s.replace('.', '').replace(',', '.')
+        elif ',' in s:
+            s = s.replace(',', '.')
+        else:
+            partes = s.split('.')
+            if len(partes) > 2:
+                s = ''.join(partes[:-1]) + '.' + partes[-1]
+        return float(s)
+
+    # 1) Linha com PIX + valor (comum em Sicoob: "Pix R$ 13.04")
+    for ln in linhas:
+        if re.search(r'\bp[il1]x\b', ln, re.IGNORECASE):
+            # Prioriza número imediatamente após PIX/R$.
+            m = re.search(
+                r'\bp[il1]x\b[^0-9]{0,10}(?:r\$\s*)?(\d{1,3}(?:[\.,]\d{3})*[\.,]\d{2}|\d+[\.,]\d{2}|\d+\s\d{2})',
+                ln,
+                re.IGNORECASE,
+            )
+            if m:
+                try:
+                    v = _parse_valor_str(m.group(1).replace(' ', '.'))
+                    if 0.01 <= v <= 99999.99:
+                        return v
+                except Exception:
+                    pass
+            v = extrair_valor(ln)
+            if v is not None:
+                return v
+
+    # 2) Linha VALOR + valor (comum em Caixa/Cielo PIX)
+    for ln in linhas:
+        if re.search(r'\bvalor\b', ln, re.IGNORECASE):
+            v = extrair_valor(ln)
+            if v is not None:
+                return v
+
+    return None
 
 
 def extrair_valor(texto):
@@ -192,23 +338,61 @@ def extrair_valor(texto):
     """
     candidatos = []
 
+    def _parse_valor(raw):
+        s = raw.strip().replace(' ', '')
+        if ',' in s and '.' in s:
+            # Ex.: 1.234,56
+            s = s.replace('.', '').replace(',', '.')
+        elif ',' in s:
+            # Ex.: 14,00
+            s = s.replace(',', '.')
+        else:
+            # Ex.: 14.00
+            partes = s.split('.')
+            if len(partes) > 2:
+                s = ''.join(partes[:-1]) + '.' + partes[-1]
+        return float(s)
+
+    def _parece_fragmento_data(txt, ini, fim):
+        janela = txt[max(0, ini - 14):min(len(txt), fim + 14)]
+        antes = txt[max(0, ini - 4):ini]
+        depois = txt[fim:min(len(txt), fim + 4)]
+
+        # Evita capturar parte de data/hora, ex: 20-04/26 12:05
+        if re.search(r'\d{1,2}\s*[/\-.]\s*\d{1,2}\s*[/\-.]\s*\d{2,4}', janela):
+            return True
+        if re.search(r'\d{1,2}:\d{2}(?::\d{2})?', janela):
+            return True
+        if re.search(r'[-/.]\s*$', antes) or re.search(r'^\s*[-/.]', depois):
+            return True
+        return False
+
+    # Casos mais confiáveis primeiro (PIX e VALOR explícito)
     for p in [
-        # Com R$ explícito — mais confiável
-        r'R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2})',
-        r'R\$\s*(\d+,\d{2})',
-        # Após palavra VALOR (padrão Cielo sem R$)
-        r'VALOR[\s:]*(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})',
-        r'VALOR[\s:]*(?:R\$\s*)?(\d+,\d{2})',
-        # Número isolado no formato brasileiro — último recurso
-        r'(?<!\d)(\d{1,3}(?:\.\d{3})*,\d{2})(?!\d)',
+        r'\bp[il1]x\b\s*(?:r\$\s*)?(\d{1,3}(?:[\.,]\d{3})*[\.,]\d{2}|\d+[\.,]\d{2})',
+        r'\br\$\s*(\d{1,3}(?:[\.,]\d{3})*[\.,]\d{2}|\d+[\.,]\d{2})',
+        r'\bvalor\b[\s:.-]*(?:r\$\s*)?(\d{1,3}(?:[\.,]\d{3})*[\.,]\d{2}|\d+[\.,]\d{2})',
     ]:
         for m in re.finditer(p, texto, re.IGNORECASE):
             try:
-                v = float(m.group(1).replace('.', '').replace(',', '.'))
+                if _parece_fragmento_data(texto, m.start(1), m.end(1)):
+                    continue
+                v = _parse_valor(m.group(1))
                 if 0.01 <= v <= 99999.99:
                     candidatos.append(v)
             except:
                 pass
+
+    # Último recurso: número monetário isolado, com filtro mais forte contra data/hora.
+    for m in re.finditer(r'(?<![\d/\-])(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d+\.\d{2})(?![\d/])', texto, re.IGNORECASE):
+        try:
+            if _parece_fragmento_data(texto, m.start(1), m.end(1)):
+                continue
+            v = _parse_valor(m.group(1))
+            if 0.01 <= v <= 99999.99:
+                candidatos.append(v)
+        except:
+            pass
 
     if not candidatos:
         return None
@@ -222,9 +406,9 @@ def extrair_data(texto):
     Também suporta DD/MM/AAAA e AAAA/MM/DD.
     """
     for p in [
-        r'(\d{2})[/\-\.](\d{2})[/\-\.](\d{4})',   # DD/MM/YYYY
-        r'(\d{4})[/\-\.](\d{2})[/\-\.](\d{2})',   # YYYY/MM/DD
-        r'(\d{2})[/\-\.](\d{2})[/\-\.](\d{2})\b', # DD/MM/YY  ← padrão Cielo
+        r'(\d{2})\s*[/\-\.]\s*(\d{2})\s*[/\-\.]\s*(\d{4})',   # DD/MM/YYYY
+        r'(\d{4})\s*[/\-\.]\s*(\d{2})\s*[/\-\.]\s*(\d{2})',   # YYYY/MM/DD
+        r'(\d{2})\s*[/\-\.]\s*(\d{2})\s*[/\-\.]\s*(\d{2})\b', # DD/MM/YY
     ]:
         m = re.search(p, texto)
         if m:
@@ -332,8 +516,11 @@ class App:
         self.lock = threading.Lock()
         self.ultimo_ocr = 0
         self.cooldown = 3.0
-        self.preview_width = 560
-        self.preview_height = 315
+        self.ocr_em_processamento = False
+        self.reader_pronto = OCR_ENGINE != "easyocr"
+        self.reader_precarregando = False
+        self.preview_width = 500
+        self.preview_height = 320
         self.data_sessao = date.today()
         self.registros = []
         self.subtotais = {}   # {(bandeira, tipo): {qtd, valor}}
@@ -345,31 +532,13 @@ class App:
 
     # ────────────────────────────────────────── UI BUILD ──────
     def _build(self):
-        # TOPBAR
-        top = tk.Frame(self.root, bg=C['surface'], height=50,
-                       highlightthickness=1, highlightbackground=C['border'])
-        top.pack(fill='x')
-        top.pack_propagate(False)
-
-        tk.Label(top, text='  ◈  LEITOR DE NOTAS DE CARTÃO',
-                 font=('Segoe UI', 13, 'bold'),
-                 fg=C['accent'], bg=C['surface']).pack(side='left', padx=4, pady=8)
-
-        self.lbl_clock = tk.Label(top, text='', font=('Segoe UI', 10),
-                                   fg=C['muted2'], bg=C['surface'])
-        self.lbl_clock.pack(side='right', padx=16)
-
-        tk.Label(top, text=f'engine: {OCR_ENGINE}',
-                 font=('Segoe UI', 9), fg=C['muted'], bg=C['surface']).pack(side='right')
-        self._tick()
-
         # BODY
         body = tk.Frame(self.root, bg=C['bg'])
         body.pack(fill='both', expand=True)
 
         # COLUNA ESQUERDA
         left = tk.Frame(body, bg=C['bg'], width=self.preview_width + 34)
-        left.pack(side='left', fill='y', padx=12, pady=12)
+        left.pack(side='left', fill='y', padx=12, pady=8)
         left.pack_propagate(False)
 
         self._bloco_camera(left)
@@ -381,7 +550,7 @@ class App:
 
         # COLUNA DIREITA
         right = tk.Frame(body, bg=C['bg'])
-        right.pack(side='right', fill='both', expand=True, padx=12, pady=12)
+        right.pack(side='right', fill='both', expand=True, padx=12, pady=8)
         self._bloco_tabela(right)
 
     # ── BLOCO CÂMERA ──────────────────────────────────────────
@@ -412,38 +581,6 @@ class App:
                                  fg=C['muted'])
         self.lbl_cam.pack(fill='both', expand=True, padx=1, pady=1)
 
-        # data sessão
-        self._sep(card)
-        dr = tk.Frame(card, bg=C['surface'])
-        dr.pack(fill='x', padx=14, pady=(8, 6))
-        self._lbl(dr, 'Data da sessão:', 9, color=C['muted']).pack(side='left', padx=(0,8))
-
-        sp_kw = dict(bg=C['surface2'], fg=C['accent'],
-                     font=('Segoe UI', 10, 'bold'), bd=0, relief='flat',
-                     highlightthickness=1, highlightcolor=C['accent'],
-                     highlightbackground=C['border'],
-                     insertbackground=C['accent'],
-                     buttonbackground=C['surface2'])
-        self.var_d = tk.StringVar(value=str(date.today().day).zfill(2))
-        self.var_m = tk.StringVar(value=str(date.today().month).zfill(2))
-        self.var_a = tk.StringVar(value=str(date.today().year))
-
-        tk.Spinbox(dr, from_=1, to=31, textvariable=self.var_d,
-                   width=3, command=self._sync_data, **sp_kw).pack(side='left')
-        self._lbl(dr, '/', 11, color=C['muted']).pack(side='left', padx=2)
-        tk.Spinbox(dr, from_=1, to=12, textvariable=self.var_m,
-                   width=3, command=self._sync_data, **sp_kw).pack(side='left')
-        self._lbl(dr, '/', 11, color=C['muted']).pack(side='left', padx=2)
-        tk.Spinbox(dr, from_=2020, to=2099, textvariable=self.var_a,
-                   width=6, command=self._sync_data, **sp_kw).pack(side='left')
-
-        dias = ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom']
-        dia_nome = dias[date.today().weekday()]
-        self.lbl_dia_nome = self._lbl(dr,
-                                       f'  {dia_nome}, {date.today().strftime("%d/%m/%Y")}',
-                                       8, color=C['muted2'])
-        self.lbl_dia_nome.pack(side='left')
-
     # ── BLOCO CAMPOS DETECTADOS ────────────────────────────────
     def _bloco_campos(self, parent):
         card = self._card(parent)
@@ -458,41 +595,55 @@ class App:
         self._sep(card)
 
         grid = tk.Frame(card, bg=C['surface'])
-        grid.pack(fill='x', padx=18, pady=12)
-        grid.columnconfigure(1, weight=1)
+        grid.pack(fill='x', padx=16, pady=10)
+        grid.columnconfigure(0, weight=1, minsize=96)
+        grid.columnconfigure(1, weight=3)
 
         self.f_bandeira = self._campo_row(grid, 0, 'BANDEIRA')
         self.f_tipo     = self._campo_row(grid, 1, 'TIPO')
         self.f_valor    = self._campo_row(grid, 2, 'VALOR')
         self.f_data     = self._campo_row(grid, 3, 'DATA DA NOTA')
 
+        self._sep(card)
+        self.lbl_hint_keys = self._lbl(
+            card,
+            'Enter: aceitar    Backspace: rejeitar',
+            8,
+            color=C['muted2']
+        )
+        self.lbl_hint_keys.pack(anchor='w', padx=14, pady=(8, 10))
+
     def _campo_row(self, parent, row, nome):
         self._lbl(parent, nome, 8, color=C['muted']).grid(
-            row=row, column=0, sticky='w', pady=5, padx=(0, 16))
+            row=row, column=0, sticky='w', pady=3, padx=(0, 12))
         lbl = tk.Label(parent, text='—', font=('Segoe UI', 12, 'bold'),
                        fg=C['surface2'], bg=C['surface'], anchor='w')
-        lbl.grid(row=row, column=1, sticky='ew', pady=5)
+        lbl.grid(row=row, column=1, sticky='ew', pady=3)
         return lbl
 
     # ── BLOCO CONTROLES ────────────────────────────────────────
     def _bloco_controles(self, parent):
         card = self._card(parent)
-        card.pack(fill='x', pady=(0, 8))
+        card.pack(fill='x', pady=(0, 6), side='bottom')
 
         # Botões câmera
         br = tk.Frame(card, bg=C['surface'])
         br.pack(fill='x', padx=14, pady=(10, 6))
+        br.columnconfigure(0, weight=1)
+        br.columnconfigure(1, weight=1)
 
-        self.btn_cam = self._btn(br, '▶  Iniciar câmera',
+        self.btn_cam = self._btn(br, '▶  Iniciar camera',
                                   bg=C['accent'], fg=C['bg'],
-                                  cmd=self._toggle_cam)
-        self.btn_cam.pack(side='left')
+                                  cmd=self._toggle_cam,
+                                  bold=True, size=10, padx=12, pady=7)
+        self.btn_cam.grid(row=0, column=0, sticky='ew')
 
-        self.btn_ocr_toggle = self._btn(br, '◎  Leitura auto',
+        self.btn_ocr_toggle = self._btn(br, '◎  Iniciar leitura',
                                          bg=C['surface2'], fg=C['muted'],
-                                         cmd=self._toggle_ocr)
+                                         cmd=self._toggle_ocr,
+                                         bold=True, size=10, padx=12, pady=7)
         self.btn_ocr_toggle.config(state='disabled')
-        self.btn_ocr_toggle.pack(side='left', padx=(8, 0))
+        self.btn_ocr_toggle.grid(row=0, column=1, sticky='ew', padx=(8, 0))
 
         # Intervalo
         ir = tk.Frame(card, bg=C['surface'])
@@ -509,26 +660,7 @@ class App:
                                     self.lbl_int.config(text=f'{float(v):.1f}s')]
                  ).pack(side='left', fill='x', expand=True, padx=6)
 
-        self._sep(card)
-
-        # Aceitar / Rejeitar
-        ar = tk.Frame(card, bg=C['surface'])
-        ar.pack(fill='x', padx=14, pady=8)
-
-        self.btn_aceitar = self._btn(ar, '↵  Aceitar  (Enter)',
-                                      bg=C['success'], fg=C['bg'],
-                                      cmd=self._aceitar, bold=True)
-        self.btn_aceitar.config(state='disabled')
-        self.btn_aceitar.pack(side='left', fill='x', expand=True, padx=(0, 6))
-
-        self.btn_rejeitar = self._btn(ar, '⌫  Rejeitar  (Backspace)',
-                                       bg=C['surface2'], fg=C['danger'],
-                                       cmd=self._rejeitar)
-        self.btn_rejeitar.config(state='disabled')
-        self.btn_rejeitar.pack(side='left', fill='x', expand=True)
-
         self.lbl_status = self._lbl(card, 'Câmera inativa', 8, color=C['muted'])
-        self.lbl_status.pack(pady=(0, 10))
 
     # ── BLOCO TABELA ──────────────────────────────────────────
     def _bloco_tabela(self, parent):
@@ -614,12 +746,34 @@ class App:
                         fg=color or C['text'],
                         bg=bg if bg else parent.cget('bg'))
 
-    def _btn(self, parent, text, bg, fg, cmd, bold=False):
+    def _btn(self, parent, text, bg, fg, cmd, bold=False, size=10,
+             padx=14, pady=7):
         return tk.Button(parent, text=text,
-                          font=('Segoe UI', 10, 'bold' if bold else 'normal'),
+                          font=('Segoe UI', size, 'bold' if bold else 'normal'),
                           bg=bg, fg=fg, activebackground=bg, activeforeground=fg,
-                          relief='flat', cursor='hand2', padx=14, pady=7,
+                          relief='flat', cursor='hand2', padx=padx, pady=pady,
                           command=cmd)
+
+    def _precarregar_ocr(self):
+        if OCR_ENGINE != "easyocr" or self.reader_pronto or self.reader_precarregando:
+            return
+
+        self.reader_precarregando = True
+        self.lbl_status.config(text='Preparando OCR…', fg=C['warn'])
+
+        def worker():
+            try:
+                get_reader()
+                self.reader_pronto = True
+                self.root.after(0, lambda: self.lbl_status.config(
+                    text='OCR pronto para leitura', fg=C['accent2']))
+            except Exception as e:
+                self.root.after(0, lambda msg=str(e): self.lbl_status.config(
+                    text=f'Falha ao inicializar OCR: {msg[:80]}', fg=C['danger']))
+            finally:
+                self.reader_precarregando = False
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # ── CÂMERA ─────────────────────────────────────────────────
     def _toggle_cam(self):
@@ -640,16 +794,18 @@ class App:
         self.badge.config(text=' ATIVA ', fg=C['accent2'], bg='#0D2E22')
         self.lbl_status.config(text='Câmera ativa — ative a leitura automática',
                                 fg=C['muted2'])
+        self._precarregar_ocr()
         threading.Thread(target=self._loop_cam, daemon=True).start()
 
     def _parar_cam(self):
         self.ocr_ativo = False
         self.capturando = False
+        self.ocr_em_processamento = False
         if self.cap: self.cap.release()
-        self.btn_cam.config(text='▶  Iniciar câmera', bg=C['accent'],
+        self.btn_cam.config(text='▶  Iniciar camera', bg=C['accent'],
                              activebackground=C['accent'])
         self.btn_ocr_toggle.config(state='disabled', fg=C['muted'],
-                                    text='◎  Leitura auto', bg=C['surface2'])
+                        text='◎  Iniciar leitura', bg=C['surface2'])
         self.badge.config(text=' INATIVA ', fg=C['muted'], bg=C['surface2'])
         self.lbl_cam.config(image='', text='sem sinal')
         self.lbl_status.config(text='Câmera inativa', fg=C['muted'])
@@ -673,10 +829,13 @@ class App:
 
             if self.ocr_ativo and self.pendente is None:
                 agora = time.time()
-                if agora - self.ultimo_ocr >= self.cooldown:
+                if (not self.ocr_em_processamento and
+                        agora - self.ultimo_ocr >= self.cooldown):
                     self.ultimo_ocr = agora
-                    threading.Thread(target=self._processar,
-                                     args=(frame.copy(),), daemon=True).start()
+                    self.ocr_em_processamento = True
+                    roi = frame[my:h-my, mx:w-mx].copy()
+                    threading.Thread(target=self._processar_wrapper,
+                                     args=(roi,), daemon=True).start()
 
             rgb = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(rgb).resize(
@@ -694,15 +853,22 @@ class App:
     def _toggle_ocr(self):
         self.ocr_ativo = not self.ocr_ativo
         if self.ocr_ativo:
+            self._precarregar_ocr()
             self.btn_ocr_toggle.config(text='◉  Pausar leitura',
                                         bg=C['warn'], fg=C['bg'],
                                         activebackground=C['warn'])
             self.lbl_status.config(text='Leitura automática ativa…', fg=C['accent2'])
         else:
-            self.btn_ocr_toggle.config(text='◎  Leitura auto',
+            self.btn_ocr_toggle.config(text='◎  Iniciar leitura',
                                         bg=C['surface2'], fg=C['text'],
                                         activebackground=C['surface2'])
             self.lbl_status.config(text='Leitura pausada', fg=C['muted'])
+
+    def _processar_wrapper(self, frame):
+        try:
+            self._processar(frame)
+        finally:
+            self.ocr_em_processamento = False
 
     # ── OCR ────────────────────────────────────────────────────
     def _processar(self, frame):
@@ -714,11 +880,46 @@ class App:
         valor = extrair_valor(texto)
         data = extrair_data(texto)
 
-        # PIX: unificar bandeira e tipo
-        if bandeira == 'PIX' and tipo is None:
-            tipo = 'PIX'
-        if tipo == 'PIX' and bandeira is None:
+        # Fallback mais forte para comprovante inclinado/ruidoso.
+        # Só executa quando bandeira ou tipo falham na primeira passada.
+        if bandeira is None or tipo is None:
+            texto_extra = extrair_texto(frame, agressivo=True)
+            if texto_extra:
+                texto = f'{texto} {texto_extra}'.strip()
+                bandeira = bandeira or extrair_bandeira(texto_extra)
+                tipo = tipo or extrair_tipo(texto_extra)
+                valor = valor if valor is not None else extrair_valor(texto_extra)
+                data = data or extrair_data(texto_extra)
+
+        # Ajuste por layout específico de PIX (campos em posições diferentes).
+        texto_pix = ''
+        if re.search(r'\bp[il1]x\b', _normalizar_texto(texto)):
+            texto_pix = extrair_texto(frame, manter_linhas=True)
+            valor_pix = extrair_valor_pix_layout(texto_pix)
+            data_pix = extrair_data_pix_layout(texto_pix)
+            if valor_pix is not None:
+                valor = valor_pix
+            if data_pix is not None:
+                data = data_pix
+
+        # PIX por instituição:
+        # - Bandeira sempre "PIX"
+        # - Tipo: "Sicoob" quando identificar; caso contrário "Caixa"
+        texto_unificado = f'{texto} {texto_pix}'.strip()
+        pix_detectado = (
+            re.search(r'\bp[il1]x\b', _normalizar_texto(texto_unificado)) is not None
+            or bandeira == 'PIX'
+            or tipo == 'PIX'
+        )
+        if pix_detectado:
+            pix_inst = extrair_pix_instituicao(texto_unificado)
             bandeira = 'PIX'
+            tipo = pix_inst if pix_inst else 'Caixa'
+            if valor is None and texto_pix:
+                # Última tentativa específica de PIX por linha.
+                valor = extrair_valor_pix_layout(texto_pix)
+            if data is None and texto_pix:
+                data = extrair_data_pix_layout(texto_pix)
 
         if valor is None:
             trecho = texto[:80].replace(chr(10), ' ') if texto else '(sem texto)'
@@ -746,8 +947,6 @@ class App:
         else:
             self.f_data.config(text='Não identificada', fg=C['muted'])
 
-        self.btn_aceitar.config(state='normal')
-        self.btn_rejeitar.config(state='normal')
         self.lbl_hint.config(text='↵ aceitar   ⌫ rejeitar', fg=C['accent'])
         self.lbl_status.config(text='Nota identificada — confirme ou rejeite',
                                 fg=C['accent2'])
@@ -785,8 +984,6 @@ class App:
         self.pendente = None
         for f in (self.f_bandeira, self.f_tipo, self.f_valor, self.f_data):
             f.config(text='—', fg=C['surface2'])
-        self.btn_aceitar.config(state='disabled')
-        self.btn_rejeitar.config(state='disabled')
         self.lbl_hint.config(text='aguardando…', fg=C['muted'])
         if self.ocr_ativo:
             self.lbl_status.config(text='Leitura automática ativa…', fg=C['accent2'])
@@ -832,8 +1029,9 @@ class App:
             pass
 
     def _tick(self):
-        self.lbl_clock.config(text=datetime.now().strftime('%H:%M:%S'))
-        self.root.after(1000, self._tick)
+        if hasattr(self, 'lbl_clock'):
+            self.lbl_clock.config(text=datetime.now().strftime('%H:%M:%S'))
+            self.root.after(1000, self._tick)
 
     def _exportar(self):
         if not self.registros:
