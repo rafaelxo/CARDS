@@ -123,7 +123,7 @@ TIPOS_REGRAS = [
 def get_reader():
     global _reader
     if _reader is None:
-        _reader = easyocr.Reader(['pt', 'en'], gpu=False)
+        _reader = easyocr.Reader(['pt', 'en'], gpu=False, verbose=False)
     return _reader
 
 
@@ -150,51 +150,64 @@ def _rotacionar(frame, angulo):
     )
 
 
-def extrair_texto(frame, agressivo=False, manter_linhas=False):
-    """Extrai texto bruto do frame. Retorna string com todos os tokens."""
+def _readtext_para_textos(resultado):
+    """Converte lista EasyOCR (detail=1) em (texto_flat, texto_linhas) sem OCR extra."""
+    if not resultado:
+        return '', ''
+
+    itens = sorted(resultado, key=lambda r: (r[0][0][1] + r[0][2][1]) / 2)
+
+    linhas, linha_atual = [], [itens[0]]
+    for item in itens[1:]:
+        y_prev = (linha_atual[-1][0][0][1] + linha_atual[-1][0][2][1]) / 2
+        y_curr = (item[0][0][1] + item[0][2][1]) / 2
+        altura = max(abs(item[0][2][1] - item[0][0][1]), 10)
+        if abs(y_curr - y_prev) < altura * 0.8:
+            linha_atual.append(item)
+        else:
+            linhas.append(linha_atual)
+            linha_atual = [item]
+    linhas.append(linha_atual)
+
+    partes = []
+    for ln in linhas:
+        ln.sort(key=lambda r: r[0][0][0])
+        partes.append(' '.join(r[1] for r in ln))
+
+    texto_linhas = '\n'.join(partes)
+    texto_flat = ' '.join(partes)
+    return texto_flat, texto_linhas
+
+
+def extrair_ocr_completo(frame):
+    """
+    Uma única chamada OCR sobre o frame (BGR).
+    Retorna (texto_flat, texto_linhas) — sem chamadas redundantes.
+    """
     if OCR_ENGINE == "easyocr":
-        candidatos = [frame]
-        if agressivo:
-            candidatos.extend([_rotacionar(frame, -6), _rotacionar(frame, 6)])
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            gray = clahe.apply(gray)
-            bw = cv2.adaptiveThreshold(
-                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                cv2.THRESH_BINARY, 21, 10
-            )
-            candidatos.append(cv2.cvtColor(bw, cv2.COLOR_GRAY2BGR))
-
-        reader = get_reader()
-        textos = []
-        for img in candidatos:
-            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            h, w = rgb.shape[:2]
-            if w < 780:
-                scale = 780 / w
-                rgb = cv2.resize(
-                    rgb,
-                    (int(w * scale), int(h * scale)),
-                    interpolation=cv2.INTER_CUBIC,
-                )
-            res = reader.readtext(rgb, detail=0, paragraph=not manter_linhas)
-            if res:
-                textos.append('\n'.join(res) if manter_linhas else ' '.join(res))
-            if not agressivo and textos:
-                break
-
-        return ' '.join(textos)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        h, w = gray.shape
+        if w < 960:
+            scale = 960 / w
+            gray = cv2.resize(gray, (int(w * scale), int(h * scale)),
+                               interpolation=cv2.INTER_CUBIC)
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
+        rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+        resultado = get_reader().readtext(rgb, detail=1, paragraph=False)
+        return _readtext_para_textos(resultado)
 
     elif OCR_ENGINE == "tesseract":
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        # Upscale antes do Tesseract
         gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         gray = clahe.apply(gray)
         binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                         cv2.THRESH_BINARY, 21, 10)
-        return pytesseract.image_to_string(binary, config='--psm 6 -l por+eng')
-    return ""
+        texto = pytesseract.image_to_string(binary, config='--psm 6 -l por+eng')
+        return texto, texto
+
+    return '', ''
 
 
 def _match_regras(texto, regras):
@@ -521,6 +534,7 @@ class App:
         self.registros = []
         self.subtotais = {}   # {(bandeira, tipo): {qtd, valor}}
         self.pendente = None
+        self._ultimo_roi = None
 
         self._build()
         self.root.bind('<Return>', self._aceitar)
@@ -827,16 +841,24 @@ class App:
                 agora = time.time()
                 if (not self.ocr_em_processamento and
                         agora - self.ultimo_ocr >= self.cooldown):
-                    self.ultimo_ocr = agora
-                    self.ocr_em_processamento = True
                     roi = frame[my:h-my, mx:w-mx].copy()
-                    threading.Thread(target=self._processar_wrapper,
-                                     args=(roi,), daemon=True).start()
+                    # Pula se o frame for praticamente idêntico ao último processado
+                    thumb = cv2.resize(roi, (64, 48), interpolation=cv2.INTER_AREA)
+                    similar = False
+                    if self._ultimo_roi is not None:
+                        diff = cv2.absdiff(thumb, self._ultimo_roi)
+                        similar = float(diff.mean()) < 3.5
+                    if not similar:
+                        self._ultimo_roi = thumb
+                        self.ultimo_ocr = agora
+                        self.ocr_em_processamento = True
+                        threading.Thread(target=self._processar_wrapper,
+                                         args=(roi,), daemon=True).start()
 
             rgb = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(rgb).resize(
                 (self.preview_width, self.preview_height),
-                Image.LANCZOS,
+                Image.BILINEAR,
             )
             imgtk = ImageTk.PhotoImage(img)
             self.root.after(0, lambda i=imgtk: self._set_cam(i))
@@ -870,55 +892,49 @@ class App:
     def _processar(self, frame):
         self.root.after(0, lambda: self.lbl_status.config(
             text='Processando…', fg=C['warn']))
-        texto = extrair_texto(frame)
+
+        # OCR único: detail=1 devolve bboxes → reconstruímos flat e linhas juntos
+        texto, texto_linhas = extrair_ocr_completo(frame)
         bandeira = extrair_bandeira(texto)
         tipo = extrair_tipo(texto)
         valor = extrair_valor(texto)
         data = extrair_data(texto)
 
-        # Fallback mais forte para comprovante inclinado/ruidoso.
-        # Só executa quando bandeira ou tipo falham na primeira passada.
+        # Fallback com rotação — executa só se necessário, para assim que achar os campos
         if bandeira is None or tipo is None:
-            texto_extra = extrair_texto(frame, agressivo=True)
-            if texto_extra:
-                texto = f'{texto} {texto_extra}'.strip()
-                bandeira = bandeira or extrair_bandeira(texto_extra)
-                tipo = tipo or extrair_tipo(texto_extra)
-                valor = valor if valor is not None else extrair_valor(texto_extra)
-                data = data or extrair_data(texto_extra)
+            for angulo in (-5, 5):
+                texto_r, _ = extrair_ocr_completo(_rotacionar(frame, angulo))
+                if texto_r:
+                    bandeira = bandeira or extrair_bandeira(texto_r)
+                    tipo = tipo or extrair_tipo(texto_r)
+                    valor = valor if valor is not None else extrair_valor(texto_r)
+                    data = data or extrair_data(texto_r)
+                if bandeira and tipo:
+                    break
 
-        # Ajuste por layout específico de PIX (campos em posições diferentes).
-        texto_pix = ''
-        if re.search(r'\bp[il1]x\b', _normalizar_texto(texto)):
-            texto_pix = extrair_texto(frame, manter_linhas=True)
-            valor_pix = extrair_valor_pix_layout(texto_pix)
-            data_pix = extrair_data_pix_layout(texto_pix)
-            if valor_pix is not None:
-                valor = valor_pix
-            if data_pix is not None:
-                data = data_pix
-
-        # PIX por instituição:
-        # - Bandeira sempre "PIX"
-        # - Tipo: "Sicoob" quando identificar; caso contrário "Caixa"
-        texto_unificado = f'{texto} {texto_pix}'.strip()
+        # PIX: reusa texto_linhas já obtido — sem OCR extra
         pix_detectado = (
-            re.search(r'\bp[il1]x\b', _normalizar_texto(texto_unificado)) is not None
+            re.search(r'\bp[il1]x\b', _normalizar_texto(texto)) is not None
             or bandeira == 'PIX'
             or tipo == 'PIX'
         )
         if pix_detectado:
-            pix_inst = extrair_pix_instituicao(texto_unificado)
+            valor_pix = extrair_valor_pix_layout(texto_linhas)
+            data_pix = extrair_data_pix_layout(texto_linhas)
+            if valor_pix is not None:
+                valor = valor_pix
+            if data_pix is not None:
+                data = data_pix
+            pix_inst = extrair_pix_instituicao(texto)
             bandeira = 'PIX'
             tipo = pix_inst if pix_inst else 'Caixa'
-            if valor is None and texto_pix:
-                # Última tentativa específica de PIX por linha.
-                valor = extrair_valor_pix_layout(texto_pix)
-            if data is None and texto_pix:
-                data = extrair_data_pix_layout(texto_pix)
+            if valor is None:
+                valor = extrair_valor_pix_layout(texto_linhas)
+            if data is None:
+                data = extrair_data_pix_layout(texto_linhas)
 
         if valor is None:
-            trecho = texto[:80].replace(chr(10), ' ') if texto else '(sem texto)'
+            trecho = texto[:80].replace('\n', ' ') if texto else '(sem texto)'
             self.root.after(0, lambda t=trecho: self.lbl_status.config(
                 text=f'Valor não encontrado. OCR: "{t}"', fg=C['muted']))
             return
