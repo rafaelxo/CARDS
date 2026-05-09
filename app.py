@@ -80,15 +80,9 @@ BANDEIRAS_REGRAS = [
 
     # ── BENEFÍCIOS ───────────────────────────────────────────────
     (r'\b[a4]l[e3]lo\b',             'Alelo'),
-    (r'\bt[il1]ck[e3]t\b',          'Ticket'),
-    (r'\bsod[e3]xo\b',              'Sodexo'),
-    (r'vr\s*(ben[e3]f[il1]c|r[e3]f[e3][il1]|[a4]l[il1]m)', 'VR Benefícios'),
-    (r'\bb[e3]n[e3]fl[e3]x\b',      'Beneflex'),
 
     # ── OUTROS ───────────────────────────────────────────────────
-    (r'\b[a4]ur[a4]\b',             'Aura'),
     (r'd[il1]n[e3]rs\s*club|\bd[il1]n[e3]rs\b', 'Diners Club'),
-    (r'\bsorocr[e3]d\b',            'Sorocred'),
 
     # Sicoob aparece em comprovantes PIX
     (r'\bs[il1]co+b\b',             'PIX'),
@@ -110,12 +104,6 @@ TIPOS_REGRAS = [
     (r'cr[e3]d[i1l]t[o0].{0,8}[a4@].{0,4}v[il1][s5]t[a4]', 'Crédito à Vista'),
     (r'\bcred[i1l]t[o0]?\s*[a4]?\s*v[i1l]st[a4]\b',      'Crédito à Vista'),
     (r'\bcred[i1l]t[o0]?\b',                               'Crédito à Vista'),
-
-    # Parcelado
-    (r'p[a4]rc[e3]l[a4]do',                       'Parcelado'),
-
-    # Contactless
-    (r'cont[a4]ctl[e3]ss|s[e3]m\s*cont[a4]to',    'Contactless'),
 ]
 
 # FUNÇÕES OCR
