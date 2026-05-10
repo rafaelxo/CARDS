@@ -1,6 +1,8 @@
 # ─── excel_manager.py ──────────────────────────────────────────────────────────
-# Escreve sessões na planilha mestre (formato compatível com a matriz do Painel).
-# Colunas nas abas mensais: A=# | B=Bandeira | C=Tipo | D=Data | E=Valor | F=Hora | G=Status
+# Escreve sessões na planilha mestre (notas_cartao.xlsx).
+# Abas mensais: A=# | B=Bandeira | C=Tipo | D=Data | E=Valor | F=Hora | G=Status
+# Painel!B1  = data do dia selecionado → TEXT(B1,"YYYY-MM") aponta a aba mensal
+# Resumo!B1  = =Painel!B1             → herda automaticamente, mostra o mês
 # ──────────────────────────────────────────────────────────────────────────────
 
 from __future__ import annotations
@@ -10,14 +12,11 @@ from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
-from openpyxl.formatting.rule import FormulaRule
 
-# ── Paleta (tema claro, espelho do template) ─────────────────────────────────
+# ── Paleta ───────────────────────────────────────────────────────────────────
 W   = 'FFFFFFFF'
-G0  = 'FFF8F9FA'
 G1  = 'FFF1F3F5'
 G2  = 'FFE9ECEF'
-G3  = 'FFADB5BD'
 G4  = 'FF6C757D'
 G5  = 'FF212529'
 NAV = 'FF1B2A3B'
@@ -26,8 +25,6 @@ BL2 = 'FFD0EBFF'
 BL3 = 'FFE7F5FF'
 GR  = 'FF2F9E44'
 GR2 = 'FFD3F9D8'
-GR3 = 'FF1B4332'
-AM  = 'FFFFEAA0'
 
 MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
             'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
@@ -37,7 +34,7 @@ BRL_FMT  = 'R$ #,##0.00'
 def fmt_brl(v: float) -> str:
     return f"R$ {v:,.2f}".replace(',','X').replace('.',',').replace('X','.')
 
-def _fl(h): 
+def _fl(h):
     h = h.lstrip('#')
     return PatternFill('solid', fgColor=('FF'+h) if len(h)==6 else h)
 
@@ -60,18 +57,17 @@ def _c(ws, r, col, val=None, *, bold=False, size=10, fg=G5, bg=W, fmt=None, h='c
     if fmt: c.number_format = fmt
     return c
 
-# ── Nome da aba ───────────────────────────────────────────────────────────────
 def _nome_aba(d: date) -> str:
+    """Formato YYYY-MM — espelho de TEXT(B1,"YYYY-MM") no Painel/Resumo."""
     return d.strftime('%Y-%m')
 
-# ── Criar aba mensal ──────────────────────────────────────────────────────────
+# ── Criar aba mensal de dados ─────────────────────────────────────────────────
 def _criar_aba(wb, nome: str, ano: int, mes: int):
     ws = wb.create_sheet(nome)
     ws.sheet_view.showGridLines = False
     ws.tab_color = '1971C2'
 
-    # Larguras: A=# B=Bandeira C=Tipo D=Data E=Valor F=Hora G=Status
-    for col, w in zip(range(1,8), [5, 22, 18, 13, 15, 10, 13]):
+    for col, w in zip(range(1, 8), [5, 22, 18, 13, 15, 10, 13]):
         ws.column_dimensions[get_column_letter(col)].width = w
 
     # Banner
@@ -88,7 +84,7 @@ def _criar_aba(wb, nome: str, ano: int, mes: int):
     ws['A2'].fill = _fl(BL)
     ws.row_dimensions[2].height = 3
 
-    # Total mensal fixo no topo
+    # Total mensal no topo
     ws.row_dimensions[3].height = 8
     ws.row_dimensions[4].height = 28
     ws.merge_cells('A4:C4')
@@ -111,16 +107,17 @@ def _criar_aba(wb, nome: str, ano: int, mes: int):
 
     ws.row_dimensions[5].height = 8
 
-    # Data Validations
+    # Data validations
     dv_b = DataValidation(type='list', formula1='ListaBandeiras',
-                           allow_blank=True, showDropDown=False,
-                           showErrorMessage=True, errorTitle='Inválido',
-                           error='Use a lista.')
+                          allow_blank=True, showDropDown=False,
+                          showErrorMessage=True, errorTitle='Inválido',
+                          error='Use a lista.')
     dv_t = DataValidation(type='list', formula1='ListaTipos',
-                           allow_blank=True, showDropDown=False,
-                           showErrorMessage=True, errorTitle='Inválido',
-                           error='Use a lista.')
-    ws.add_data_validation(dv_b); ws.add_data_validation(dv_t)
+                          allow_blank=True, showDropDown=False,
+                          showErrorMessage=True, errorTitle='Inválido',
+                          error='Use a lista.')
+    ws.add_data_validation(dv_b)
+    ws.add_data_validation(dv_t)
     dv_b.sqref = 'B8:B9999'
     dv_t.sqref = 'C8:C9999'
 
@@ -129,7 +126,6 @@ def _criar_aba(wb, nome: str, ano: int, mes: int):
 
 # ── Escrever bloco de um dia ──────────────────────────────────────────────────
 def _escrever_dia(ws, row: int, d: date, registros: list[dict]) -> int:
-    # Cabeçalho do dia
     label = f'  {DIAS_PT[d.weekday()]}  {d.strftime("%d/%m/%Y")}'
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
     c = ws.cell(row, 1, label)
@@ -145,16 +141,15 @@ def _escrever_dia(ws, row: int, d: date, registros: list[dict]) -> int:
     ws.row_dimensions[row].height = 22
     row += 1
 
-    # Cabeçalho de colunas
-    for col, h in enumerate(['#','Bandeira','Tipo','Data','Valor (R$)','Hora','Status'], 1):
+    for col, h in enumerate(['#', 'Bandeira', 'Tipo', 'Data', 'Valor (R$)', 'Hora', 'Status'], 1):
         c = ws.cell(row, col, h)
         c.font      = _fn(9, True, BL)
         c.fill      = _fl(BL2)
         c.alignment = _al('center')
         c.border    = Border(
-            left=Side(style='thin',   color=G2),
-            right=Side(style='thin',  color=G2),
-            top=Side(style='thin',    color=G2),
+            left=Side(style='thin',     color=G2),
+            right=Side(style='thin',    color=G2),
+            top=Side(style='thin',      color=G2),
             bottom=Side(style='medium', color=BL),
         )
     ws.row_dimensions[row].height = 20
@@ -169,7 +164,7 @@ def _escrever_dia(ws, row: int, d: date, registros: list[dict]) -> int:
         _c(ws, row, 3, reg['tipo'],           bg=bg, size=10, fg=G5)
         _c(ws, row, 4, d,                     bg=bg, fmt='DD/MM/YYYY')
         _c(ws, row, 5, reg['valor'] or 0,     bg=bg, bold=True, fg=NAV, fmt=BRL_FMT)
-        _c(ws, row, 6, reg.get('hora',''),    bg=bg, size=9,  fg=G4)
+        _c(ws, row, 6, reg.get('hora', ''),   bg=bg, size=9,  fg=G4)
         cs = _c(ws, row, 7, st,               bg=bg, size=9)
         if st != 'OK':
             cs.font = _fn(9, True, 'FFD97706')
@@ -178,7 +173,6 @@ def _escrever_dia(ws, row: int, d: date, registros: list[dict]) -> int:
 
     fim = row - 1
 
-    # Subtotal
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
     c = ws.cell(row, 1, f'  Subtotal  {DIAS_PT[d.weekday()]}  {d.strftime("%d/%m")}')
     c.font = _fn(9, True, GR); c.fill = _fl(GR2)
@@ -213,24 +207,27 @@ class ExcelManager:
             ws, next_row = _criar_aba(self.wb, nome, d.year, d.month)
             self._ordenar_abas()
         _escrever_dia(ws, next_row, d, registros)
-        # Atualiza a célula de data do Painel automaticamente
         self._atualizar_data_painel(d)
         total = sum(r['valor'] or 0 for r in registros)
         self.wb.save(self.caminho)
         return total
 
     def _atualizar_data_painel(self, d: date) -> None:
-        """Escreve a data da sessão na célula C4 do Painel (seletor de data)."""
+        """
+        Escreve a data da sessão em Painel!B1.
+        As fórmulas do Painel/Resumo usam TEXT(B1,"YYYY-MM") para apontar
+        à aba mensal correta. Resumo!B1 = =Painel!B1, então fica sincronizado.
+        """
         if 'Painel' not in self.wb.sheetnames:
             return
-        ws_p = self.wb['Painel']
-        c = ws_p.cell(4, 3)   # C4 — DATE_CELL do template
-        c.value          = d
-        c.number_format  = 'DD/MM/YYYY'
+        c = self.wb['Painel']['B1']
+        c.value         = d
+        c.number_format = 'DD/MM/YYYY'
 
     def _ordenar_abas(self):
-        ordem = [s for s in ('Config','Painel') if s in self.wb.sheetnames]
-        ordem += sorted(s for s in self.wb.sheetnames if s not in ('Config','Painel'))
+        prioridade = ['Config', 'Painel', 'Resumo']
+        ordem = [s for s in prioridade if s in self.wb.sheetnames]
+        ordem += sorted(s for s in self.wb.sheetnames if s not in prioridade)
         for i, nome in enumerate(ordem):
             idx = self.wb.sheetnames.index(nome)
             if idx != i:

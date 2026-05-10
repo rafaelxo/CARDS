@@ -1,10 +1,9 @@
 # ─── ui/fields_block.py ───────────────────────────────────────────────────────
 # Painel de campos detectados pelo OCR.
-# Pressione \ sobre qualquer campo para editar:
-#   Bandeira → dropdown filtrável
-#   Tipo     → dropdown filtrável
-#   Valor    → entrada numérica inline
-#   Data     → calendário popup
+# Bandeira → dropdown filtrável
+# Tipo     → dropdown filtrável
+# Valor    → entrada numérica inline
+# Data     → calendário popup
 # ──────────────────────────────────────────────────────────────────────────────
 
 from __future__ import annotations
@@ -14,16 +13,18 @@ from datetime import date
 from typing import Callable, Optional
 from config import C
 
+# Espelho exato do Config da planilha (ListaBandeiras)
 BANDEIRAS = [
-    'Visa', 'Visa Electron', 'Visa Vale', 'Visa Pré-pago',
-    'Mastercard', 'Mastercard Pré-pago', 'Maestro',
+    'Visa', 'Visa Pré-pago',
+    'Mastercard', 'Mastercard Pré-pago',
     'Elo', 'Elo Pré-pago',
     'Hipercard', 'American Express',
     'Cabal', 'Cabal Pré-pago',
-    'Alelo', 'Diners Club',
+    'Alelo',
     'PIX',
 ]
 
+# Espelho exato do Config da planilha (ListaTipos)
 TIPOS = [
     'Débito à Vista',
     'Crédito à Vista',
@@ -59,33 +60,30 @@ class _Dropdown(tk.Toplevel):
         super().__init__(anchor)
         self.overrideredirect(True)
         self.configure(bg=C['border'])
-        self._opcoes   = opcoes
+        self._opcoes    = opcoes
         self._on_select = on_select
 
-        # ── busca ─────────────────────────────────────────────────────────────
         top = tk.Frame(self, bg=C['surface2'])
-        top.pack(fill='x', padx=1, pady=(1,0))
+        top.pack(fill='x', padx=1, pady=(1, 0))
         tk.Label(top, text='🔍', bg=C['surface2'], fg=C['muted'],
-                 font=('Segoe UI',10)).pack(side='left', padx=(8,4))
+                 font=('Segoe UI', 10)).pack(side='left', padx=(8, 4))
         self._sv = tk.StringVar()
         self._sv.trace_add('write', self._filtrar)
-        e = tk.Entry(top, textvariable=self._sv, font=('Segoe UI',10),
+        e = tk.Entry(top, textvariable=self._sv, font=('Segoe UI', 10),
                      bg=C['surface2'], fg=C['text'],
                      insertbackground=C['accent'], relief='flat', bd=0)
-        e.pack(side='left', fill='x', expand=True, padx=(0,8))
+        e.pack(side='left', fill='x', expand=True, padx=(0, 8))
         e.focus_set()
         e.bind('<Return>',  self._enter)
-        e.bind('<Down>',    lambda _: (self._lb.focus_set(),
-                                       self._lb.selection_set(0)))
+        e.bind('<Down>',    lambda _: (self._lb.focus_set(), self._lb.selection_set(0)))
         e.bind('<Escape>',  lambda _: self.destroy())
 
-        # ── lista ─────────────────────────────────────────────────────────────
         fr = tk.Frame(self, bg=C['surface'])
-        fr.pack(fill='both', expand=True, padx=1, pady=(0,1))
+        fr.pack(fill='both', expand=True, padx=1, pady=(0, 1))
         sb = tk.Scrollbar(fr, orient='vertical', width=8,
-                           bg=C['surface2'], troughcolor=C['surface'])
+                          bg=C['surface2'], troughcolor=C['surface'])
         self._lb = tk.Listbox(
-            fr, font=('Segoe UI',11),
+            fr, font=('Segoe UI', 11),
             bg=C['surface'], fg=C['text'],
             selectbackground=C['accent'], selectforeground=C['bg'],
             activestyle='none', relief='flat', bd=0,
@@ -94,9 +92,9 @@ class _Dropdown(tk.Toplevel):
         sb.config(command=self._lb.yview)
         self._lb.pack(side='left', fill='both', expand=True)
         sb.pack(side='right', fill='y')
-        self._lb.bind('<Return>',         self._confirmar)
-        self._lb.bind('<Double-Button-1>',self._confirmar)
-        self._lb.bind('<Escape>',         lambda _: self.destroy())
+        self._lb.bind('<Return>',          self._confirmar)
+        self._lb.bind('<Double-Button-1>', self._confirmar)
+        self._lb.bind('<Escape>',          lambda _: self.destroy())
 
         self._preencher(opcoes, atual)
         self._posicionar(anchor)
@@ -129,16 +127,16 @@ class _Dropdown(tk.Toplevel):
     def _posicionar(self, w: tk.Widget):
         self.update_idletasks()
         x, y = w.winfo_rootx(), w.winfo_rooty() + w.winfo_height()
-        self.geometry(f'{max(w.winfo_width(),260)}x260+{x}+{y}')
+        self.geometry(f'{max(w.winfo_width(), 260)}x260+{x}+{y}')
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Calendário popup
 # ═══════════════════════════════════════════════════════════════════════════════
 class _Calendario(tk.Toplevel):
-    _MESES   = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
-                'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
-    _HDR     = ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom']
+    _MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+              'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
+    _HDR   = ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom']
 
     def __init__(self, anchor: tk.Widget, atual: Optional[date],
                  on_select: Callable[[date], None]):
@@ -156,20 +154,20 @@ class _Calendario(tk.Toplevel):
 
         nav = tk.Frame(outer, bg=C['surface2'])
         nav.pack(fill='x')
-        tk.Button(nav, text='◀', font=('Segoe UI',10), fg=C['text'],
+        tk.Button(nav, text='◀', font=('Segoe UI', 10), fg=C['text'],
                   bg=C['surface2'], relief='flat', bd=0, cursor='hand2',
                   activebackground=C['surface'],
                   command=self._ant).pack(side='left', padx=6, pady=5)
-        self._nav_lbl = tk.Label(nav, font=('Segoe UI',10,'bold'),
+        self._nav_lbl = tk.Label(nav, font=('Segoe UI', 10, 'bold'),
                                   fg=C['text'], bg=C['surface2'])
         self._nav_lbl.pack(side='left', expand=True)
-        tk.Button(nav, text='▶', font=('Segoe UI',10), fg=C['text'],
+        tk.Button(nav, text='▶', font=('Segoe UI', 10), fg=C['text'],
                   bg=C['surface2'], relief='flat', bd=0, cursor='hand2',
                   activebackground=C['surface'],
                   command=self._prox).pack(side='right', padx=6, pady=5)
 
         self._grade = tk.Frame(outer, bg=C['surface'])
-        self._grade.pack(padx=8, pady=(0,8))
+        self._grade.pack(padx=8, pady=(0, 8))
         self._desenhar()
         self._posicionar(anchor)
         self.grab_set()
@@ -181,20 +179,20 @@ class _Calendario(tk.Toplevel):
         self._nav_lbl.config(text=f'{self._MESES[self._mes-1]}  {self._ano}')
         for col, d in enumerate(self._HDR):
             tk.Label(self._grade, text=d, width=4,
-                     font=('Segoe UI',8,'bold'),
-                     fg=C['muted'], bg=C['surface']).grid(row=0, column=col, pady=(4,2))
+                     font=('Segoe UI', 8, 'bold'),
+                     fg=C['muted'], bg=C['surface']).grid(row=0, column=col, pady=(4, 2))
         primeiro, total = calendar.monthrange(self._ano, self._mes)
         hoje = date.today()
         dia, row, col = 1, 1, primeiro
         while dia <= total:
             d = date(self._ano, self._mes, dia)
-            sel  = d == self._sel
+            sel   = d == self._sel
             hoje_ = d == hoje
             fg = C['bg'] if sel else C['accent'] if hoje_ else C['text']
             bg = C['accent'] if sel else C['surface2'] if hoje_ else C['surface']
             tk.Button(
                 self._grade, text=str(dia), width=3,
-                font=('Segoe UI',9,'bold' if sel or hoje_ else 'normal'),
+                font=('Segoe UI', 9, 'bold' if sel or hoje_ else 'normal'),
                 fg=fg, bg=bg, relief='flat', bd=0, cursor='hand2',
                 activebackground=C['accent2'], activeforeground=C['bg'],
                 command=lambda dd=d: (self._on_select(dd), self.destroy()),
@@ -225,35 +223,31 @@ class _Calendario(tk.Toplevel):
 class _Campo(tk.Frame):
     def __init__(self, parent: tk.Frame, row: int, nome: str, tipo: str):
         super().__init__(parent, bg=C['surface'])
-        self._tipo     = tipo
-        self._valor    = None
+        self._tipo      = tipo
+        self._valor     = None
         self._on_change: Optional[Callable] = None
         self._data_sessao: Optional[date]   = None
-        self._editando = False
+        self._editando  = False
 
-        # Nome do campo
-        tk.Label(self, text=nome, font=('Segoe UI',8), fg=C['muted'],
+        tk.Label(self, text=nome, font=('Segoe UI', 8), fg=C['muted'],
                  bg=C['surface'], anchor='w', width=13).pack(side='left')
 
-        # Container que alterna entre label e entry
         self._cnt = tk.Frame(self, bg=C['surface'])
         self._cnt.pack(side='left', fill='x', expand=True)
 
         self._lbl = tk.Label(self._cnt, text='—',
-                              font=('Segoe UI',14,'bold'),
-                              fg=C['surface2'], bg=C['surface'],
-                              anchor='w', cursor='hand2')
+                             font=('Segoe UI', 14, 'bold'),
+                             fg=C['surface2'], bg=C['surface'],
+                             anchor='w', cursor='hand2')
         self._lbl.pack(fill='x')
         self._lbl.bind('<Button-1>', self._abrir)
 
-        # Hint de edição (canto direito)
-        self._hint_lbl = tk.Label(self, text='', font=('Segoe UI',7),
+        self._hint_lbl = tk.Label(self, text='', font=('Segoe UI', 7),
                                    fg=C['muted'], bg=C['surface'])
-        self._hint_lbl.pack(side='right', padx=(4,2))
+        self._hint_lbl.pack(side='right', padx=(4, 2))
 
         self.grid(row=row, column=0, columnspan=2, sticky='ew', pady=2)
 
-    # ── Configuração pós-setup ────────────────────────────────────────────────
     def configurar(self, on_change: Callable, data_sessao: date, root: tk.Tk):
         self._on_change   = on_change
         self._data_sessao = data_sessao
@@ -281,7 +275,6 @@ class _Campo(tk.Frame):
     def ativo(self) -> bool:
         return self._valor is not None
 
-    # ── Abertura via \ global ─────────────────────────────────────────────────
     def abrir_se_ativo(self, _=None):
         if self.ativo() and not self._editando:
             self._abrir()
@@ -294,19 +287,15 @@ class _Campo(tk.Frame):
         self._hint_lbl.config(text='editando…', fg=C['warn'])
 
         if self._tipo == 'bandeira':
-            _Dropdown(self._lbl, BANDEIRAS,
-                      str(self._valor or ''), self._ok_str)
-
+            _Dropdown(self._lbl, BANDEIRAS, str(self._valor or ''), self._ok_str)
         elif self._tipo == 'tipo':
-            _Dropdown(self._lbl, TIPOS,
-                      str(self._valor or ''), self._ok_str)
-
+            _Dropdown(self._lbl, TIPOS, str(self._valor or ''), self._ok_str)
         elif self._tipo == 'valor':
             self._lbl.pack_forget()
             val = self._valor if isinstance(self._valor, float) else 0.0
             sv = tk.StringVar(value=f"{val:.2f}".replace('.', ','))
             e = tk.Entry(self._cnt, textvariable=sv,
-                         font=('Segoe UI',14,'bold'),
+                         font=('Segoe UI', 14, 'bold'),
                          fg=C['accent2'], bg=C['surface2'],
                          insertbackground=C['accent2'],
                          relief='flat', bd=0, justify='left')
@@ -316,12 +305,10 @@ class _Campo(tk.Frame):
             e.bind('<Escape>',   lambda _, w=e: self._fechar_entry(w))
             e.bind('<FocusOut>', lambda _, w=e: self._fechar_entry(w))
             self._entry_w = e
-
         elif self._tipo == 'data':
             d = self._valor if isinstance(self._valor, date) else None
             _Calendario(self._lbl, d, self._ok_data)
 
-    # ── Confirmações ──────────────────────────────────────────────────────────
     def _ok_str(self, valor: str):
         self._editando = False
         self._valor = valor
@@ -359,8 +346,6 @@ class _Campo(tk.Frame):
 # FieldsBlock
 # ═══════════════════════════════════════════════════════════════════════════════
 class FieldsBlock(tk.Frame):
-    """Painel de campos identificados, com edição por \\."""
-
     def __init__(self, parent: tk.Widget):
         super().__init__(parent, bg=C['bg'])
         self._campos: dict[str, _Campo] = {}
@@ -369,10 +354,10 @@ class FieldsBlock(tk.Frame):
     def _build(self):
         from ui.widgets import card, lbl, sep
         c = card(self)
-        c.pack(fill='x', pady=(0,8))
+        c.pack(fill='x', pady=(0, 8))
 
         hdr = tk.Frame(c, bg=C['surface'])
-        hdr.pack(fill='x', padx=14, pady=(10,4))
+        hdr.pack(fill='x', padx=14, pady=(10, 4))
         lbl(hdr, 'Campos identificados', 11, bold=True).pack(side='left')
         self._hint = lbl(hdr, 'aguardando…', 8, color=C['muted'])
         self._hint.pack(side='right')
@@ -394,28 +379,24 @@ class FieldsBlock(tk.Frame):
 
         sep(c)
         rodape = tk.Frame(c, bg=C['surface'])
-        rodape.pack(fill='x', padx=14, pady=(6,10))
+        rodape.pack(fill='x', padx=14, pady=(6, 10))
         lbl(rodape, 'Enter: aceitar    Backspace: rejeitar',
             8, color=C['muted2']).pack(side='left')
         lbl(rodape, 'clique no campo para editar', 8, color=C['muted']).pack(side='right')
 
     def configurar(self, root: tk.Tk, data_sessao: date,
                    on_change: Callable[[str, object], None]):
-        """Conecta callbacks após setup da sessão."""
         self._root = root
         for campo in self._campos.values():
             campo.configurar(on_change, data_sessao, root)
-        # Bind global de \ — cicla pelos campos com valor
 
     def _backslash_global(self, event: tk.Event):
-        """Abre o editor do primeiro campo ativo que não está sendo editado."""
         for key in ('bandeira', 'tipo', 'valor', 'data'):
             campo = self._campos[key]
             if campo.ativo() and not campo._editando:
                 campo.abrir_se_ativo()
                 return
 
-    # ── API ────────────────────────────────────────────────────────────────────
     def exibir(self, reg: dict, data_sessao: date):
         self._campos['bandeira'].set_valor(reg['bandeira'])
         self._campos['tipo'].set_valor(reg['tipo'])
