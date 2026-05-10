@@ -240,7 +240,7 @@ class _Campo(tk.Frame):
         self._cnt.pack(side='left', fill='x', expand=True)
 
         self._lbl = tk.Label(self._cnt, text='—',
-                              font=('Segoe UI',12,'bold'),
+                              font=('Segoe UI',14,'bold'),
                               fg=C['surface2'], bg=C['surface'],
                               anchor='w', cursor='hand2')
         self._lbl.pack(fill='x')
@@ -270,7 +270,7 @@ class _Campo(tk.Frame):
         else:
             texto = '—'; fg = C['surface2']
         self._lbl.config(text=texto, fg=fg)
-        self._hint_lbl.config(text='\\  editar' if valor and texto != '—' else '')
+        self._hint_lbl.config(text='clique para editar' if valor and texto != '—' else '')
 
     def limpar(self):
         self._valor = None
@@ -306,7 +306,7 @@ class _Campo(tk.Frame):
             val = self._valor if isinstance(self._valor, float) else 0.0
             sv = tk.StringVar(value=f"{val:.2f}".replace('.', ','))
             e = tk.Entry(self._cnt, textvariable=sv,
-                         font=('Segoe UI',12,'bold'),
+                         font=('Segoe UI',14,'bold'),
                          fg=C['accent2'], bg=C['surface2'],
                          insertbackground=C['accent2'],
                          relief='flat', bd=0, justify='left')
@@ -326,7 +326,7 @@ class _Campo(tk.Frame):
         self._editando = False
         self._valor = valor
         self._lbl.config(text=valor, fg=C['text'])
-        self._hint_lbl.config(text='\\  editar', fg=C['muted'])
+        self._hint_lbl.config(text='clique para editar', fg=C['muted'])
         if self._on_change: self._on_change(self._tipo, valor)
 
     def _ok_valor(self, sv: tk.StringVar, entry: tk.Entry):
@@ -352,7 +352,7 @@ class _Campo(tk.Frame):
         if self._valor is not None:
             self._lbl.config(fg=C['text'])
         self._hint_lbl.config(
-            text='\\  editar' if self.ativo() else '', fg=C['muted'])
+            text='clique para editar' if self.ativo() else '', fg=C['muted'])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -397,7 +397,7 @@ class FieldsBlock(tk.Frame):
         rodape.pack(fill='x', padx=14, pady=(6,10))
         lbl(rodape, 'Enter: aceitar    Backspace: rejeitar',
             8, color=C['muted2']).pack(side='left')
-        lbl(rodape, '\\: editar campo', 8, color=C['muted']).pack(side='right')
+        lbl(rodape, 'clique no campo para editar', 8, color=C['muted']).pack(side='right')
 
     def configurar(self, root: tk.Tk, data_sessao: date,
                    on_change: Callable[[str, object], None]):
@@ -406,7 +406,6 @@ class FieldsBlock(tk.Frame):
         for campo in self._campos.values():
             campo.configurar(on_change, data_sessao, root)
         # Bind global de \ — cicla pelos campos com valor
-        root.bind('\\', self._backslash_global)
 
     def _backslash_global(self, event: tk.Event):
         """Abre o editor do primeiro campo ativo que não está sendo editado."""
@@ -427,7 +426,7 @@ class FieldsBlock(tk.Frame):
                 reg['data'], fg=C['success'] if ok else C['warn'])
         else:
             self._campos['data'].set_valor(None)
-        self._hint.config(text='↵ aceitar   ⌫ rejeitar   \\: editar', fg=C['accent'])
+        self._hint.config(text='↵ aceitar   ⌫ rejeitar', fg=C['accent'])
 
     def limpar(self):
         for campo in self._campos.values():

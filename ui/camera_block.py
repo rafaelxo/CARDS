@@ -1,6 +1,4 @@
 # ─── ui/camera_block.py ───────────────────────────────────────────────────────
-# Widget de câmera: preview ao vivo, loop de captura e disparo automático de OCR.
-# ──────────────────────────────────────────────────────────────────────────────
 
 from __future__ import annotations
 
@@ -10,47 +8,39 @@ from typing import Callable, Optional
 
 import cv2
 import numpy as np
-from PIL import Image, ImageTk
+from PIL import Image, ImageOps, ImageTk
 
 import tkinter as tk
 from config import C, CAM_FPS, CAM_HEIGHT, CAM_WIDTH, OCR_DIFF_THRESHOLD, OCR_THUMB_SIZE
-from ui.widgets import btn, card, lbl, sep
+from ui.widgets import btn, card, lbl
 
 
 class CameraBlock(tk.Frame):
-    """
-    Frame que encapsula câmera ao vivo + disparo de OCR automático.
-
-    Callbacks:
-        on_frame(roi: np.ndarray)  — chamado quando um frame novo deve ser processado
-        on_status(msg, color)      — atualiza label de status externo
-    """
-
     def __init__(self, parent: tk.Widget,
                  on_frame: Callable[[np.ndarray], None],
                  on_status: Callable[[str, str], None],
                  get_cooldown: Callable[[], float],
+                 set_cooldown: Callable[[float], None],
                  preview_w: int, preview_h: int):
         super().__init__(parent, bg=C['bg'])
 
-        self._on_frame    = on_frame
-        self._on_status   = on_status
+        self._on_frame     = on_frame
+        self._on_status    = on_status
         self._get_cooldown = get_cooldown
-        self.preview_w    = preview_w
-        self.preview_h    = preview_h
+        self._set_cooldown = set_cooldown
+        self.preview_w     = preview_w
+        self.preview_h     = preview_h
 
         self._cap: Optional[cv2.VideoCapture] = None
-        self._capturando   = False
+        self._capturando           = False
         self._pendente_confirmacao = False
-        self._ultimo_ocr   = 0.0
-        self._ocr_rodando  = False
+        self._ultimo_ocr           = 0.0
+        self._ocr_rodando          = False
         self._ultimo_roi: Optional[np.ndarray] = None
-        self._lock         = threading.Lock()
-        self._frame_atual: Optional[np.ndarray] = None
+        self._lock                 = threading.Lock()
 
         self._build()
 
-    # ── Layout ───────────────────────────────────────────────────────────────
     def _build(self) -> None:
         c = card(self)
         c.pack(fill='x', pady=(0, 8))
@@ -66,17 +56,12 @@ class CameraBlock(tk.Frame):
         )
         self._badge.pack(side='right')
 
-        # Preview
-        wrap = tk.Frame(c, bg=C['border'],
-                        width=self.preview_w + 2, height=self.preview_h + 2)
-        wrap.pack(fill='x', padx=14, pady=(0, 8))
-        wrap.pack_propagate(False)
-
+        # Preview — sem wrap extra, sem bordas pretas
         self._lbl_cam = tk.Label(
-            wrap, bg='#0A0C10',
+            c, bg=C['surface'],
             text='sem sinal', font=('Segoe UI', 10), fg=C['muted'],
         )
-        self._lbl_cam.pack(fill='both', expand=True, padx=1, pady=1)
+        self._lbl_cam.pack(fill='x', padx=0, pady=0)
 
         # Botão câmera
         self._btn_cam = btn(
@@ -85,17 +70,36 @@ class CameraBlock(tk.Frame):
             cmd=self._toggle,
             bold=True, size=10, padx=12, pady=7,
         )
-        self._btn_cam.pack(fill='x', padx=14, pady=(0, 10))
+        self._btn_cam.pack(fill='x', padx=14, pady=(8, 4))
 
-    # ── Controles públicos ───────────────────────────────────────────────────
+        # Intervalo — logo abaixo do botão
+        ir = tk.Frame(c, bg=C['surface'])
+        ir.pack(fill='x', padx=14, pady=(0, 10))
+        lbl(ir, 'Intervalo de leitura:', 8, color=C['muted']).pack(side='left')
+        self._lbl_int = lbl(ir, '3.0s', 8, color=C['accent2'])
+        self._lbl_int.pack(side='right')
+        self._var_int = tk.DoubleVar(value=self._get_cooldown())
+        tk.Scale(
+            ir, from_=1, to=8, resolution=0.5, orient='horizontal',
+            variable=self._var_int, bg=C['surface'], fg=C['muted'],
+            troughcolor=C['surface2'], highlightthickness=0,
+            showvalue=False, sliderlength=14,
+            command=self._on_slider,
+        ).pack(side='left', fill='x', expand=True, padx=6)
+
+    def _on_slider(self, v: str) -> None:
+        val = float(v)
+        self._set_cooldown(val)
+        self._lbl_int.config(text=f'{val:.1f}s')
+
+    # ── Controles públicos ────────────────────────────────────────────────────
     def marcar_pendente(self, ativo: bool) -> None:
-        """Informa ao loop de câmera que há confirmação aguardando (pausa OCR)."""
         self._pendente_confirmacao = ativo
 
     def parar(self) -> None:
         self._parar_cam()
 
-    # ── Câmera ───────────────────────────────────────────────────────────────
+    # ── Câmera ────────────────────────────────────────────────────────────────
     def _toggle(self) -> None:
         if self._capturando:
             self._parar_cam()
@@ -129,68 +133,54 @@ class CameraBlock(tk.Frame):
         self._on_status('Câmera inativa', C['muted'])
 
     def _loop(self) -> None:
-        """Loop de captura rodando em thread separada."""
         frame_interval = 1.0 / CAM_FPS
 
         while self._capturando:
             t0 = time.monotonic()
-
             ret, frame = self._cap.read()
             if not ret:
                 break
 
-            with self._lock:
-                self._frame_atual = frame
-
-            # Overlay na cópia de display
-            display = frame.copy()
-            h, w = display.shape[:2]
+            h, w = frame.shape[:2]
             mx, my = int(w * .04), int(h * .04)
-            cor = (79, 142, 247)  # azul padrão
 
+            display = frame.copy()
             if self._pendente_confirmacao:
                 txt, cor = 'AGUARDANDO CONFIRMAÇÃO...', (245, 166, 35)
             elif self._ocr_rodando:
                 txt, cor = 'LENDO...', (56, 217, 169)
             else:
-                txt = 'POSICIONE A NOTA'
+                txt, cor = 'POSICIONE A NOTA', (79, 142, 247)
 
             cv2.rectangle(display, (mx, my), (w - mx, h - my), cor, 2)
             cv2.putText(display, txt, (mx + 4, my - 8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.44, cor, 1)
 
-            # Disparo automático de OCR
+            # Disparo OCR
             if not self._pendente_confirmacao and not self._ocr_rodando:
                 agora = time.monotonic()
                 if agora - self._ultimo_ocr >= self._get_cooldown():
                     roi = frame[my: h - my, mx: w - mx].copy()
-                    # Evita re-processar frame idêntico
-                    thumb = cv2.resize(roi, OCR_THUMB_SIZE,
-                                       interpolation=cv2.INTER_AREA)
+                    thumb = cv2.resize(roi, OCR_THUMB_SIZE, interpolation=cv2.INTER_AREA)
                     similar = (
                         self._ultimo_roi is not None
-                        and float(cv2.absdiff(thumb, self._ultimo_roi).mean())
-                        < OCR_DIFF_THRESHOLD
+                        and float(cv2.absdiff(thumb, self._ultimo_roi).mean()) < OCR_DIFF_THRESHOLD
                     )
                     if not similar:
                         self._ultimo_roi = thumb
                         self._ultimo_ocr = agora
                         self._ocr_rodando = True
-                        threading.Thread(
-                            target=self._processar_wrapper,
-                            args=(roi,),
-                            daemon=True,
-                        ).start()
+                        threading.Thread(target=self._processar_wrapper,
+                                         args=(roi,), daemon=True).start()
 
-            # Renderizar preview
+            # Preview sem bordas pretas — crop centralizado
             rgb = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(rgb).resize(
-                (self.preview_w, self.preview_h), Image.BILINEAR
-            )
+            img = ImageOps.fit(Image.fromarray(rgb),
+                               (self.preview_w, self.preview_h),
+                               Image.BILINEAR, centering=(0.5, 0.5))
             imgtk = ImageTk.PhotoImage(img)
             self.after(0, self._set_preview, imgtk)
 
-            # Throttle
             elapsed = time.monotonic() - t0
             time.sleep(max(0, frame_interval - elapsed))
 
