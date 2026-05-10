@@ -7,7 +7,7 @@ APP_MINSIZE  = (1100, 720)
 PREVIEW_W = 500
 PREVIEW_H = 320
 
-OCR_COOLDOWN_DEFAULT = 3.0   # segundos entre leituras automáticas
+OCR_COOLDOWN_DEFAULT = 1.5   # segundos entre leituras automáticas
 OCR_DIFF_THRESHOLD   = 3.5   # diferença mínima entre frames (evita re-leitura)
 OCR_THUMB_SIZE       = (64, 48)
 
