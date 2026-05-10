@@ -1,16 +1,29 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 datas = []
 binaries = []
-hiddenimports = ['PIL._tkinter_finder']
-tmp_ret = collect_all('easyocr')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+hiddenimports = [
+    'PIL._tkinter_finder',
+    'config',
+    'ocr_engine',
+    'excel_manager',
+    'ui',
+    'ui.widgets',
+    'ui.camera_block',
+    'ui.fields_block',
+    'ui.table_block',
+    'ui.setup_dialog',
+]
 
+tmp_ret = collect_all('easyocr')
+datas      += tmp_ret[0]
+binaries   += tmp_ret[1]
+hiddenimports += tmp_ret[2]
 
 a = Analysis(
     ['app.py'],
-    pathex=[],
+    pathex=['.'],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
@@ -21,6 +34,7 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

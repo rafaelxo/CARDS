@@ -20,13 +20,7 @@ echo [2/4] Instalando dependencias...
 pip install easyocr opencv-python Pillow openpyxl numpy pyinstaller --quiet
 
 echo [3/4] Gerando executavel...
-pyinstaller --onefile --windowed --name "LeituraNotas" ^
-    --add-data "." ^
-    --hidden-import "easyocr" ^
-    --hidden-import "cv2" ^
-    --hidden-import "PIL" ^
-    --hidden-import "openpyxl" ^
-    app.py
+pyinstaller LeituraNotas.spec
 
 echo [4/4] Concluido!
 echo.
