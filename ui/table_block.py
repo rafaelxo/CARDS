@@ -24,7 +24,7 @@ class TableBlock(tk.Frame):
     Painel direito com tabela de subtotais e rodapé de total.
 
     Callbacks:
-        on_exportar()   — botão "Anexar relatório diário"
+        on_exportar()   — botão "Anexar"
         on_limpar()     — botão "Limpar"
     """
 
@@ -42,7 +42,7 @@ class TableBlock(tk.Frame):
         # Cabeçalho com botões
         hdr = tk.Frame(self, bg=C['bg'])
         hdr.pack(fill='x', pady=(0, 8))
-        lbl(hdr, 'Totalizador da sessão', 13, bold=True,
+        lbl(hdr, 'Acumulador', 13, bold=True,
             bg=C['bg']).pack(side='left')
 
         btn(hdr, '✕ Limpar',
@@ -50,7 +50,7 @@ class TableBlock(tk.Frame):
             cmd=self._on_limpar,
         ).pack(side='right')
 
-        btn(hdr, '📎  Anexar relatório diário',
+        btn(hdr, '📎  Anexar',
             bg=C['accent2'], fg=C['bg'],
             cmd=self._on_exportar, bold=True,
         ).pack(side='right', padx=(0, 8))
@@ -99,7 +99,7 @@ class TableBlock(tk.Frame):
         )
         self._lbl_qtd.pack(side='left', padx=16, pady=14)
 
-        lbl(footer, 'Total geral:', 9, color=C['muted'],
+        lbl(footer, 'Total Geral:', 9, color=C['muted'],
             bg=C['surface']).pack(side='right', padx=(0, 4), pady=14)
 
         self._lbl_total = tk.Label(

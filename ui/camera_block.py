@@ -76,7 +76,7 @@ class CameraBlock(tk.Frame):
         ir = tk.Frame(c, bg=C['surface'])
         ir.pack(fill='x', padx=14, pady=(0, 10))
         lbl(ir, 'Intervalo de leitura:', 8, color=C['muted']).pack(side='left')
-        self._lbl_int = lbl(ir, '3.0s', 8, color=C['accent2'])
+        self._lbl_int = lbl(ir, '1.5s', 8, color=C['accent2'])
         self._lbl_int.pack(side='right')
         self._var_int = tk.DoubleVar(value=self._get_cooldown())
         tk.Scale(

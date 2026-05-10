@@ -141,7 +141,7 @@ class App:
         self._pendente = reg
         self._cam_block.marcar_pendente(True)
         self._fields_block.exibir(reg, self.data_sessao)
-        self._set_status('Nota identificada — Enter: aceitar   Backspace: rejeitar',
+        self._set_status('Nota identificada — ↵  Aceitar   ⌫  Rejeitar',
                           C['accent2'])
 
     def _on_campo_editado(self, tipo: str, valor) -> None:

@@ -380,7 +380,7 @@ class FieldsBlock(tk.Frame):
         sep(c)
         rodape = tk.Frame(c, bg=C['surface'])
         rodape.pack(fill='x', padx=14, pady=(6, 10))
-        lbl(rodape, 'Enter: aceitar    Backspace: rejeitar',
+        lbl(rodape, '↵ aceitar  ·  ⌫ rejeitar',
             8, color=C['muted2']).pack(side='left')
         lbl(rodape, 'clique no campo para editar', 8, color=C['muted']).pack(side='right')
 
