@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from typing import Callable, Optional
@@ -11,7 +12,8 @@ import numpy as np
 from PIL import Image, ImageOps, ImageTk
 
 import tkinter as tk
-from config import C, CAM_FPS, CAM_HEIGHT, CAM_WIDTH, OCR_DIFF_THRESHOLD, OCR_THUMB_SIZE
+from config import (C, CAM_FPS, CAM_HEIGHT, CAM_WIDTH, OCR_DIFF_THRESHOLD,
+                    OCR_STABLE_THRESHOLD, OCR_THUMB_SIZE)
 from ui.widgets import btn, card, lbl
 
 
@@ -37,6 +39,7 @@ class CameraBlock(tk.Frame):
         self._ultimo_ocr           = 0.0
         self._ocr_rodando          = False
         self._ultimo_roi: Optional[np.ndarray] = None
+        self._thumb_anterior: Optional[np.ndarray] = None
         self._lock                 = threading.Lock()
 
         self._build()
@@ -76,11 +79,11 @@ class CameraBlock(tk.Frame):
         ir = tk.Frame(c, bg=C['surface'])
         ir.pack(fill='x', padx=14, pady=(0, 10))
         lbl(ir, 'Intervalo de leitura:', 8, color=C['muted']).pack(side='left')
-        self._lbl_int = lbl(ir, '1.5s', 8, color=C['accent2'])
+        self._lbl_int = lbl(ir, f'{self._get_cooldown():.1f}s', 8, color=C['accent2'])
         self._lbl_int.pack(side='right')
         self._var_int = tk.DoubleVar(value=self._get_cooldown())
         tk.Scale(
-            ir, from_=1, to=8, resolution=0.5, orient='horizontal',
+            ir, from_=0.5, to=8, resolution=0.5, orient='horizontal',
             variable=self._var_int, bg=C['surface'], fg=C['muted'],
             troughcolor=C['surface2'], highlightthickness=0,
             showvalue=False, sliderlength=14,
@@ -107,13 +110,16 @@ class CameraBlock(tk.Frame):
             self._iniciar_cam()
 
     def _iniciar_cam(self) -> None:
-        self._cap = cv2.VideoCapture(0)
+        # DirectShow abre a câmera em ~1s no Windows (MSMF pode levar 5–10s)
+        self._cap = cv2.VideoCapture(0, cv2.CAP_DSHOW if sys.platform == 'win32' else cv2.CAP_ANY)
         if not self._cap.isOpened():
             from tkinter import messagebox
             messagebox.showerror('Erro', 'Câmera não encontrada.\nVerifique a conexão.')
             return
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAM_WIDTH)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
+        self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # sempre o frame mais recente
+        self._thumb_anterior = None
         self._capturando = True
         self._btn_cam.config(text='■  Parar câmera',
                               bg=C['danger'], activebackground=C['danger'])
@@ -156,12 +162,17 @@ class CameraBlock(tk.Frame):
             cv2.putText(display, txt, (mx + 4, my - 8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.44, cor, 1)
 
-            # Disparo OCR
-            if not self._pendente_confirmacao and not self._ocr_rodando:
+            # Disparo OCR — só com a nota parada (sem borrão de movimento)
+            roi = frame[my: h - my, mx: w - mx]
+            thumb = cv2.resize(roi, OCR_THUMB_SIZE, interpolation=cv2.INTER_AREA)
+            parado = (
+                self._thumb_anterior is not None
+                and float(cv2.absdiff(thumb, self._thumb_anterior).mean()) < OCR_STABLE_THRESHOLD
+            )
+            self._thumb_anterior = thumb
+            if parado and not self._pendente_confirmacao and not self._ocr_rodando:
                 agora = time.monotonic()
                 if agora - self._ultimo_ocr >= self._get_cooldown():
-                    roi = frame[my: h - my, mx: w - mx].copy()
-                    thumb = cv2.resize(roi, OCR_THUMB_SIZE, interpolation=cv2.INTER_AREA)
                     similar = (
                         self._ultimo_roi is not None
                         and float(cv2.absdiff(thumb, self._ultimo_roi).mean()) < OCR_DIFF_THRESHOLD
@@ -171,7 +182,7 @@ class CameraBlock(tk.Frame):
                         self._ultimo_ocr = agora
                         self._ocr_rodando = True
                         threading.Thread(target=self._processar_wrapper,
-                                         args=(roi,), daemon=True).start()
+                                         args=(roi.copy(),), daemon=True).start()
 
             # Preview sem bordas pretas — crop centralizado
             rgb = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)

@@ -16,10 +16,11 @@ import numpy as np
 from config import BANDEIRAS_REGRAS, TIPOS_REGRAS
 
 # ── Detecção de engine disponível ──────────────────────────────────────────
+# RapidOCR = modelos PaddleOCR PP-OCRv5 (Latin) em ONNX Runtime: ~0,1 s/leitura em CPU.
 try:
-    import easyocr as _easyocr
-    OCR_ENGINE = "easyocr"
-    _reader: Optional[_easyocr.Reader] = None
+    from rapidocr import LangRec, ModelType, OCRVersion, RapidOCR as _RapidOCR
+    OCR_ENGINE = "rapidocr"
+    _reader: Optional["_RapidOCR"] = None
 except ImportError:
     try:
         import pytesseract as _pytesseract  # type: ignore
@@ -29,39 +30,24 @@ except ImportError:
 
 
 # ── Reader singleton ────────────────────────────────────────────────────────
-def get_reader() -> "_easyocr.Reader":
-    """Inicializa e retorna o reader EasyOCR (singleton, thread-safe via GIL)."""
+def get_reader() -> "_RapidOCR":
+    """Inicializa e retorna o engine RapidOCR (singleton)."""
     global _reader
     if _reader is None:
-        _reader = _easyocr.Reader(['pt', 'en'], gpu=False, verbose=False)
+        _reader = _RapidOCR(params={
+            "Rec.ocr_version": OCRVersion.PPOCRV5,
+            "Rec.lang_type":   LangRec.LATIN,   # modelo latino: mantém espaços e acentos
+            "Rec.model_type":  ModelType.MOBILE,
+            "Global.use_cls":  False,           # nota sempre em pé na moldura
+            "Global.log_level": "error",
+        })
     return _reader
-
-
-# ── Pré-processamento de imagem ─────────────────────────────────────────────
-def _preparar_gray(frame: np.ndarray, min_width: int = 960) -> np.ndarray:
-    """Converte BGR→gray, escala para largura mínima e aplica CLAHE."""
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    h, w = gray.shape
-    if w < min_width:
-        scale = min_width / w
-        gray = cv2.resize(gray, (int(w * scale), int(h * scale)),
-                          interpolation=cv2.INTER_CUBIC)
-    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-    return clahe.apply(gray)
-
-
-def _rotacionar(frame: np.ndarray, angulo: float) -> np.ndarray:
-    h, w = frame.shape[:2]
-    M = cv2.getRotationMatrix2D((w // 2, h // 2), angulo, 1.0)
-    return cv2.warpAffine(frame, M, (w, h),
-                          flags=cv2.INTER_CUBIC,
-                          borderMode=cv2.BORDER_REPLICATE)
 
 
 # ── Reconstrução de linhas a partir de bboxes ───────────────────────────────
 def _readtext_para_textos(resultado: list) -> tuple[str, str]:
     """
-    Converte lista EasyOCR (detail=1) em (texto_flat, texto_linhas).
+    Converte lista [(bbox, texto, score)] em (texto_flat, texto_linhas).
     Agrupa tokens por linha usando posição Y dos bboxes.
     """
     if not resultado:
@@ -92,11 +78,11 @@ def extrair_ocr_completo(frame: np.ndarray) -> tuple[str, str]:
     Uma única passagem OCR sobre o frame BGR.
     Retorna (texto_flat, texto_linhas).
     """
-    if OCR_ENGINE == "easyocr":
-        gray = _preparar_gray(frame)
-        rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
-        resultado = get_reader().readtext(rgb, detail=1, paragraph=False)
-        return _readtext_para_textos(resultado)
+    if OCR_ENGINE == "rapidocr":
+        out = get_reader()(frame)
+        if out.boxes is None:
+            return '', ''
+        return _readtext_para_textos(list(zip(out.boxes, out.txts, out.scores)))
 
     if OCR_ENGINE == "tesseract":
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -326,18 +312,6 @@ def processar_frame(frame) -> Optional[dict]:
     tipo     = extrair_tipo(texto)
     valor    = extrair_valor(texto)
     data_nota = extrair_data(texto)
-
-    # Fallback com leve rotação
-    if bandeira is None or tipo is None:
-        for angulo in (-5, 5):
-            t_r, _ = extrair_ocr_completo(_rotacionar(frame, angulo))
-            if t_r:
-                bandeira  = bandeira  or extrair_bandeira(t_r)
-                tipo      = tipo      or extrair_tipo(t_r)
-                valor     = valor     if valor is not None else extrair_valor(t_r)
-                data_nota = data_nota or extrair_data(t_r)
-            if bandeira and tipo:
-                break
 
     # Refinamento PIX
     pix = (

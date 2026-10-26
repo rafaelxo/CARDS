@@ -63,7 +63,7 @@ class App:
         self._fields_block.configurar(
             self.root, self.data_sessao, self._on_campo_editado)
 
-        if OCR_ENGINE == 'easyocr':
+        if OCR_ENGINE == 'rapidocr':
             threading.Thread(target=self._precarregar_ocr, daemon=True).start()
 
     def _precarregar_ocr(self) -> None:

@@ -7,12 +7,13 @@ APP_MINSIZE  = (1100, 720)
 PREVIEW_W = 500
 PREVIEW_H = 320
 
-OCR_COOLDOWN_DEFAULT = 1.5   # segundos entre leituras automáticas
+OCR_COOLDOWN_DEFAULT = 0.5   # segundos entre leituras automáticas
 OCR_DIFF_THRESHOLD   = 3.5   # diferença mínima entre frames (evita re-leitura)
+OCR_STABLE_THRESHOLD = 2.0   # diferença máx. entre frames seguidos p/ considerar a nota parada (calibrar por câmera)
 OCR_THUMB_SIZE       = (64, 48)
 
-CAM_WIDTH  = 640
-CAM_HEIGHT = 480
+CAM_WIDTH  = 1280
+CAM_HEIGHT = 720
 CAM_FPS    = 30
 
 C: dict[str, str] = {
